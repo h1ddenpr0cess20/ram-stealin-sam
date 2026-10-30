@@ -279,6 +279,75 @@ function canMoveTo(x,z){
   if(Math.abs(x)<1.55&&z>32&&z<36.7)return false;
   return true;
 }
+
+// Shared grid navigation from the player's current tile. Walkability is
+// sampled from the same expanded building footprints used by collision.
+const NAV_MIN=-40,NAV_SIZE=81,NAV_COUNT=NAV_SIZE*NAV_SIZE;
+const navWalkable=new Uint8Array(NAV_COUNT),navDistances=new Int16Array(NAV_COUNT),navQueue=new Int16Array(NAV_COUNT);
+let navGoal=-1;
+function navIndex(x,z){return (z-NAV_MIN)*NAV_SIZE+(x-NAV_MIN);}
+function navWorld(i){return {x:i%NAV_SIZE+NAV_MIN,z:Math.floor(i/NAV_SIZE)+NAV_MIN,index:i};}
+for(let z=NAV_MIN;z<=40;z++)for(let x=NAV_MIN;x<=40;x++)navWalkable[navIndex(x,z)]=canMoveTo(x,z)?1:0;
+function nearestWalkableCell(x,z){
+ const cx=Math.max(NAV_MIN,Math.min(40,Math.round(x))),cz=Math.max(NAV_MIN,Math.min(40,Math.round(z)));
+ for(let r=0;r<=8;r++){
+  let best=null,score=Infinity;
+  for(let dz=-r;dz<=r;dz++)for(let dx=-r;dx<=r;dx++){
+   if(r&&Math.max(Math.abs(dx),Math.abs(dz))!==r)continue;
+   const nx=cx+dx,nz=cz+dz;
+   if(nx<NAV_MIN||nx>40||nz<NAV_MIN||nz>40)continue;
+   const index=navIndex(nx,nz);if(!navWalkable[index])continue;
+   const d=dx*dx+dz*dz;if(d<score){score=d;best={x:nx,z:nz,index};}
+  }
+  if(best)return best;
+ }
+ return null;
+}
+function rebuildNavigation(x,z){
+ const goal=nearestWalkableCell(x,z);
+ if(!goal||goal.index===navGoal)return;
+ navGoal=goal.index;navDistances.fill(-1);
+ let head=0,tail=0;navQueue[tail++]=goal.index;navDistances[goal.index]=0;
+ while(head<tail){
+  const here=navWorld(navQueue[head++]),distance=navDistances[here.index]+1;
+  const adjacent=[[here.x+1,here.z],[here.x-1,here.z],[here.x,here.z+1],[here.x,here.z-1]];
+  for(const [nx,nz] of adjacent){
+   if(nx<NAV_MIN||nx>40||nz<NAV_MIN||nz>40)continue;
+   const next=navIndex(nx,nz);
+   if(!navWalkable[next]||navDistances[next]!==-1)continue;
+   navDistances[next]=distance;navQueue[tail++]=next;
+  }
+ }
+}
+function nextNavigationWaypoint(x,z){
+ const here=nearestWalkableCell(x,z);if(!here)return null;
+ const d=navDistances[here.index];if(d<0)return null;
+ if(d===0)return {x:player.x,z:player.z};
+ let best=here.index,bestD=d;
+ for(const [nx,nz] of [[here.x+1,here.z],[here.x-1,here.z],[here.x,here.z+1],[here.x,here.z-1]]){
+  if(nx<NAV_MIN||nx>40||nz<NAV_MIN||nz>40)continue;
+  const next=navIndex(nx,nz),nd=navDistances[next];
+  if(nd>=0&&nd<bestD){best=next;bestD=nd;}
+ }
+ return best===here.index?null:navWorld(best);
+}
+function moveTownsperson(person,tx,tz,speed,dt){
+ const dx=tx-person.x,dz=tz-person.z,d=Math.hypot(dx,dz);
+ if(d<0.12)return false;
+ const step=Math.min(d,speed*dt),nx=person.x+dx/d*step,nz=person.z+dz/d*step;
+ const ox=person.x,oz=person.z;
+ if(canMoveTo(nx,person.z))person.x=nx;
+ if(canMoveTo(person.x,nz))person.z=nz;
+ return Math.hypot(person.x-ox,person.z-oz)>0.0001;
+}
+function chooseWanderTarget(person){
+ for(let i=0;i<10;i++){
+  const angle=Math.random()*Math.PI*2,radius=0.7+Math.random()*1.8;
+  const x=person.homeX+Math.cos(angle)*radius,z=person.homeZ+Math.sin(angle)*radius;
+  if(canMoveTo(x,z)){person.wanderX=x;person.wanderZ=z;person.wanderTimer=2.4+Math.random()*2.2;return;}
+ }
+ person.wanderX=person.homeX;person.wanderZ=person.homeZ;person.wanderTimer=1.2;
+}
 addBox(0,0.65,35,2.8,1.25,4.2,mats.dark);
 addBox(0,1.35,35,2.45,0.32,2.35,mats.dark);
 addBox(0,1.34,33.72,2.08,0.48,0.05,mats.glass,false);
@@ -337,9 +406,11 @@ const townsfolk=citizenSpots.map(([x,z],i)=>{
  const model=createModel(GFX,citizenCast[i%citizenCast.length],{detail:0.72});scene.add(model.group);
  model.group.scale.setScalar(i%5===4?0.96:0.9);
  const isCop=i%5===4||i===8||i===13,isVendor=i%4===1,hp=isCop?3:2;
- const person={model,x,z,homeX:x,homeZ:z,hp,maxHp:hp,kind:isCop?'COP':isVendor?'VENDOR':'NEIGHBOUR',
-  speed:isCop?3:isVendor?2.2:2.55,damage:isCop?16:isVendor?10:12,drop:isCop?3:2,
-  aggro:false,stun:0,windup:0,attackTimer:0,respawn:0,phase:i*1.31};
+ const baseSpeed=isCop?3:isVendor?2.2:2.55,baseDamage=isCop?16:isVendor?10:12;
+ const person={model,x,z,homeX:x,homeZ:z,hp,maxHp:hp,baseHp:hp,kind:isCop?'COP':isVendor?'VENDOR':'NEIGHBOUR',
+  speed:baseSpeed,baseSpeed,damage:baseDamage,baseDamage,drop:isCop?3:2,
+  aggro:false,stun:0,windup:0,attackTimer:0,respawn:0,phase:i*1.31,
+  wanderX:x,wanderZ:z,wanderTimer:Math.random()*1.5};
  model.group.position.set(x,surfaceAt(x,z),z);return person;
 });
 function alertTownfolk(property){
@@ -520,34 +591,49 @@ stage.run((rawDt)=>{
    effects.ring(item.x,0,item.z,{colour:'#a6ff52',reach:1.8,life:0.4});showToast('FIRST AID  +28 HEALTH');updateHud();
   }
  }
- for(const person of townsfolk){
-  if(person.hp<=0){
-   person.respawn-=dt;
-   if(person.respawn<=0){person.hp=person.maxHp;person.aggro=false;person.stun=0;person.windup=0;person.x=person.homeX;person.z=person.homeZ;person.model.group.visible=true;}
-   else continue;
+  if(townsfolk.some(person=>person.aggro&&person.hp>0))rebuildNavigation(player.x,player.z);
+  for(const person of townsfolk){
+    if(person.hp<=0){
+      person.respawn-=dt;
+      if(person.respawn<=0){
+        person.hp=person.maxHp;person.stun=0;person.windup=0;person.x=person.homeX;person.z=person.homeZ;
+        person.model.group.visible=true;person.wanderTimer=0;
+      }else continue;
+    }
+    person.stun=Math.max(0,person.stun-dt);
+    person.attackTimer=Math.max(0,person.attackTimer-dt);
+    const dx=player.x-person.x,dz=player.z-person.z,distance=Math.hypot(dx,dz);
+    const wasWinding=person.windup>0;
+    if(wasWinding){
+      person.windup=Math.max(0,person.windup-dt);
+      if(person.windup===0&&distance<1.8&&person.stun<=0)hurtPlayer(person,distance);
+    }
+    let moving=false;
+    if(person.stun<=0&&person.windup<=0){
+      if(person.aggro&&distance>1.25){
+        const waypoint=nextNavigationWaypoint(person.x,person.z);
+        moving=moveTownsperson(person,waypoint?waypoint.x:player.x,waypoint?waypoint.z:player.z,person.speed,dt);
+      }else if(!person.aggro){
+        person.wanderTimer-=dt;
+        const wanderDistance=Math.hypot(person.wanderX-person.x,person.wanderZ-person.z);
+        if(person.wanderTimer<=0||wanderDistance<0.18)chooseWanderTarget(person);
+        moving=moveTownsperson(person,person.wanderX,person.wanderZ,person.speed*0.42,dt);
+        if(!moving&&wanderDistance>0.25)person.wanderTimer=0;
+      }
+    }
+    person.x=Math.max(-39,Math.min(39,person.x));
+    person.z=Math.max(-39,Math.min(39,person.z));
+    person.model.group.position.set(person.x,surfaceAt(person.x,person.z),person.z);
+    if(moving)person.model.group.rotation.y=Math.atan2(player.x-person.x,player.z-person.z);
+    person.model.pose({
+      clip:person.stun>0?'hit':person.windup>0?'attack':moving?'walk':'idle',
+      t:elapsed+person.phase,time:elapsed,
+    });
+    if(!wasWinding&&person.aggro&&person.windup<=0&&distance<1.45&&person.attackTimer<=0&&person.stun<=0){
+      person.windup=0.42;person.attackTimer=1.35;
+      effects.ring(person.x,0,person.z,{colour:'#ff6159',reach:1.25,life:0.36});
+    }
   }
-  person.stun=Math.max(0,person.stun-dt);person.attackTimer=Math.max(0,person.attackTimer-dt);
-  const dx=player.x-person.x,dz=player.z-person.z,distance=Math.hypot(dx,dz),winding=person.windup>0;
-  if(winding){person.windup=Math.max(0,person.windup-dt);if(person.windup===0&&distance<1.8&&person.stun<=0)hurtPlayer(person,distance);}
-  let vx=0,vz=0;
-  if(person.stun<=0&&person.windup<=0){
-   if(person.aggro&&distance<16&&distance>1){vx=dx/Math.max(0.01,distance);vz=dz/Math.max(0.01,distance);}
-   else{
-    const a=elapsed*(person.aggro?0.38:0.34)+person.phase,tx=person.homeX+Math.cos(a)*(person.aggro?1.2:1.05),tz=person.homeZ+Math.sin(a)*(person.aggro?1.2:1.05);
-    const txd=tx-person.x,tzd=tz-person.z,td=Math.hypot(txd,tzd);if(td>0.12){vx=txd/td;vz=tzd/td;}
-   }
-   const nx=person.x+vx*person.speed*dt,nz=person.z+vz*person.speed*dt;
-   if(canMoveTo(nx,person.z))person.x=nx;if(canMoveTo(person.x,nz))person.z=nz;
-  }
-  person.x=Math.max(-39,Math.min(39,person.x));person.z=Math.max(-39,Math.min(39,person.z));
-  person.model.group.position.set(person.x,surfaceAt(person.x,person.z),person.z);
-  if(Math.abs(vx)+Math.abs(vz)>0.01)person.model.group.rotation.y=Math.atan2(vx,vz);
-  person.model.pose({clip:person.stun>0?'hit':person.windup>0?'attack':Math.abs(vx)+Math.abs(vz)>0.01?'walk':'idle',t:elapsed+person.phase,time:elapsed});
-  if(!winding&&person.aggro&&person.windup<=0&&distance<1.45&&person.attackTimer<=0&&person.stun<=0){
-   person.windup=0.42;person.attackTimer=1.35;
-   effects.ring(person.x,0,person.z,{colour:'#ff6159',reach:1.25,life:0.36});
-  }
- }
  if(player.grounded&&player.ram>0&&Math.hypot(player.x-GETAWAY.x,player.z-GETAWAY.z)<2.9)deliverRam();
  const k=1-Math.exp(-5*dt);
  stage.target.x+=(player.x-stage.target.x)*k;stage.target.y+=(player.y+1.15-stage.target.y)*k;stage.target.z+=(player.z-stage.target.z)*k;
