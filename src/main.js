@@ -166,22 +166,22 @@ const platformFinishes = [
 ];
 const platforms = [
   // Start deck and first climb.
-  { x: 0, z: 17, w: 7, d: 7, h: 0.9, finish: 0, label: 'START' },
-  { x: 0, z: 9, w: 6, d: 6, h: 1.1, finish: 1 },
+  { x: 0, z: 17, w: 6, d: 6, h: 0.9, finish: 0, label: 'START' },
+  { x: 0, z: 9, w: 5.4, d: 5.4, h: 1.1, finish: 1 },
   // West route, then the central transfer hub.
-  { x: -7, z: 4, w: 6, d: 6, h: 1.3, finish: 2 },
-  { x: -14, z: -1, w: 7, d: 7, h: 1.5, finish: 1 },
-  { x: -7, z: -7, w: 6, d: 6, h: 1.3, finish: 0 },
-  { x: 0, z: -1, w: 9, d: 9, h: 1.45, finish: 0, label: 'HUB' },
+  { x: -7, z: 4, w: 5.4, d: 5.4, h: 1.3, finish: 2 },
+  { x: -14, z: -1, w: 5.4, d: 5.4, h: 1.5, finish: 1 },
+  { x: -7, z: -7, w: 5.4, d: 5.4, h: 1.3, finish: 0 },
+  { x: 0, z: -1, w: 7.2, d: 7.2, h: 1.45, finish: 0, label: 'HUB' },
   // North spur and mirrored east route form a loop back to the start.
-  { x: 0, z: -10, w: 6, d: 6, h: 1.7, finish: 2 },
-  { x: 7, z: -7, w: 6, d: 6, h: 1.3, finish: 1 },
-  { x: 14, z: -1, w: 7, d: 7, h: 1.5, finish: 2 },
-  { x: 7, z: 4, w: 6, d: 6, h: 1.3, finish: 1 },
+  { x: 0, z: -10, w: 5.4, d: 5.4, h: 1.7, finish: 2 },
+  { x: 7, z: -7, w: 5.4, d: 5.4, h: 1.3, finish: 1 },
+  { x: 14, z: -1, w: 5.4, d: 5.4, h: 1.5, finish: 2 },
+  { x: 7, z: 4, w: 5.4, d: 5.4, h: 1.3, finish: 1 },
   // Optional high-risk outer ledges branch from the hub and upper spur.
-  { x: -15, z: -12, w: 5, d: 5, h: 1.9, finish: 2 },
-  { x: 15, z: -12, w: 5, d: 5, h: 1.9, finish: 2 },
-  { x: 0, z: -18, w: 7, d: 6, h: 2.05, finish: 1 },
+  { x: -8, z: -15, w: 5.4, d: 5.4, h: 1.9, finish: 2 },
+  { x: 8, z: -15, w: 5.4, d: 5.4, h: 1.9, finish: 2 },
+  { x: 0, z: -18, w: 6, d: 5.4, h: 2.05, finish: 1 },
 ];
 for (const [index, p] of platforms.entries()) {
   // Solid box is the physical deck; the textured plane sits exactly at the
@@ -189,12 +189,12 @@ for (const [index, p] of platforms.entries()) {
   addBox(p.x, p.h / 2, p.z, p.w, p.h, p.d, mats.dark, false);
   const top = new GFX.Mesh(new GFX.PlaneGeometry(p.w - 0.12, p.d - 0.12), platformFinishes[p.finish]);
   top.rotation.x = -Math.PI / 2;
-  top.position.set(p.x, p.h + 0.08, p.z);
+  top.position.set(p.x, p.h + 0.012, p.z);
   top.receiveShadow = true;
   scene.add(top);
 
   // High-contrast perimeter markings clarify every landing edge.
-  const edgeY = p.h + 0.105;
+  const edgeY = p.h + 0.035;
   const edgeMat = index % 3 === 0 ? mats.trim : mats.warning;
   addBox(p.x, edgeY, p.z - p.d / 2 + 0.055, p.w - 0.16, 0.035, 0.075, edgeMat, false);
   addBox(p.x, edgeY, p.z + p.d / 2 - 0.055, p.w - 0.16, 0.035, 0.075, edgeMat, false);
@@ -218,7 +218,7 @@ function surfaceAt(x, z) {
 function canMoveTo(x, z, feetY) {
   if (x < -23.2 || x > 23.2 || z < -23.2 || z > 23.2) return false;
   for (const p of platforms) {
-    if (insideFootprint(x, z, p, 0.08) && feetY < p.h + 0.08 - 0.05) return false;
+    if (insideFootprint(x, z, p, 0.08) && feetY < p.h + 0.012 - 0.05) return false;
   }
   return true;
 }
@@ -260,7 +260,7 @@ function spawnRam(x, z, amount = 1) {
 [
   [0, 17], [0, 9], [-7, 4], [-14, -1], [-7, -7],
   [0, -1], [0, -10], [7, -7], [14, -1], [7, 4],
-  [-15, -12], [15, -12], [0, -18], [-14, 8], [14, 8], [18, -12],
+  [-8, -15], [8, -15], [0, -18], [-14, 8], [14, 8], [18, -12],
 ].forEach(([x, z], i) => spawnRam(x, z, i % 4 === 0 ? 2 : 1));
 
 // Opponents are intentionally generic cast-library people, not real individuals.
