@@ -1,52 +1,33 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#070d16" />
-    <title>RAM STEALIN' SAM</title>
-  </head>
-  <body>
-    <main id="game"></main>
-    <section id="overlay" aria-live="polite">
-      <header class="topbar">
-        <div class="brand"><span class="brand-mark">R</span><span>RAM STEALIN' SAM</span></div>
-        <div class="stats">
-          <div class="stat"><small>RAM STOLEN</small><strong id="ram-count">00</strong></div>
-          <div class="stat"><small>DELIVERED</small><strong id="delivered-count">00 / 20</strong></div>
-          <div class="stat health-stat"><small>HEALTH</small><div class="health-track"><i id="health-fill"></i></div></div>
-        </div>
-      </header>
-      <div class="mission">
-        <span class="eyebrow">CURRENT OBJECTIVE</span>
-        <strong id="objective">Collect RAM. Deliver it to the data center.</strong>
-        <span id="status">The data center is always hungry.</span>
-      </div>
-      <div class="toast" id="toast"></div>
-      <footer class="controls">
-        <span><kbd>WASD</kbd> MOVE</span><span><kbd>SPACE</kbd> JUMP</span><span><kbd>F</kbd> RAM RAID</span><span><kbd>SHIFT</kbd> SPRINT</span><span><kbd>DRAG</kbd> MOVE</span><span><kbd>RIGHT DRAG</kbd> LOOK</span><span><kbd>M</kbd> MUTE</span>
-      </footer>
-      <div class="mobile-hint">Drag to move · use the buttons to jump and raid</div>
-      <button id="jump-button" aria-label="Jump">JUMP</button>
-      <button id="attack-button" aria-label="RAM raid">RAM RAID</button>
-      <div id="start-screen">
-        <div class="start-card">
-          <p class="eyebrow">A VERY EXPENSIVE WALK IN THE PARK</p>
-          <h1>RAM<br/><em>STEALIN'</em><br/>SAM</h1>
-          <p>Raid the plaza. Take the RAM. Feed the data center.</p>
-          <button id="start-button">START THE RAID</button>
-          <small>WASD / arrows move · Space jumps · F raids · Shift sprints</small>
-        </div>
-      </div>
-      <div id="win-screen" hidden>
-        <div class="start-card">
-          <p class="eyebrow">QUARTERLY TARGET EXCEEDED</p>
-          <h2>DATA CENTER<br/><em>FED.</em></h2>
-          <p id="win-copy">20 RAM delivered. Shareholders are thrilled.</p>
-          <button id="play-again">PLAY AGAIN</button>
-        </div>
-      </div>
-    </section>
-    <script type="module" src="/src/main.js"></script>
-  </body>
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="theme-color" content="#070d16"/><title>RAM STEALIN' SAM — DEPOT RAID</title></head>
+<body>
+<main id="game"></main>
+<section id="overlay" aria-live="polite">
+ <header class="topbar">
+  <div class="brand"><span class="brand-mark">R</span><span>RAM STEALIN' SAM <small>DEPOT RAID</small></span></div>
+  <div class="stats">
+   <div class="stat"><small>CARRIED</small><strong id="ram-count">00</strong></div>
+   <div class="stat"><small>BANKED</small><strong id="delivered-count">00 / 20</strong></div>
+   <div class="stat"><small>SCORE</small><strong id="score-count">00000</strong></div>
+   <div class="stat health-stat"><small>HEALTH</small><div class="health-track"><i id="health-fill"></i></div></div>
+  </div>
+ </header>
+ <aside class="mission"><span class="eyebrow">LIVE CONTRACT / DEPOT 07</span><strong id="objective">Strip the yard. Bank 20 RAM at the north terminal.</strong><span id="status">Raid the rivals or strip the marked decks for RAM.</span></aside>
+ <div class="run-state"><div><small>COMBO</small><strong id="combo-count">—</strong></div><div><small>DASH</small><strong id="dash-status">READY</strong></div><div><small>TIME</small><strong id="run-time">00:00</strong></div></div>
+ <div class="radar-wrap"><span class="eyebrow">YARD RADAR</span><canvas id="radar" width="168" height="168"></canvas></div>
+ <div class="toast" id="toast"></div>
+ <footer class="controls"><span><kbd>WASD</kbd> MOVE</span><span><kbd>SPACE</kbd> JUMP</span><span><kbd>R</kbd> DASH</span><span><kbd>F</kbd> RAID</span><span><kbd>SHIFT</kbd> SPRINT</span><span><kbd>DRAG</kbd> MOVE</span><span><kbd>RIGHT DRAG</kbd> LOOK</span><span><kbd>M</kbd> MUTE</span></footer>
+ <div class="mobile-hint">Drag to move · use the buttons to jump, dash and raid</div>
+ <div class="mobile-actions"><button id="jump-button" aria-label="Jump">JUMP</button><button id="dash-button" aria-label="Dash">DASH</button><button id="attack-button" aria-label="RAM raid">RAID</button></div>
+ <div id="start-screen"><div class="start-card">
+  <p class="eyebrow">CONTRACT 07 / PRIVATE PROPERTY IS A SUGGESTION</p><h1>RAM<br/><em>STEALIN'</em><br/>SAM</h1>
+  <p>Hit the depot. Take the memory. Get it to the terminal before security empties your pockets.</p>
+  <div class="briefing"><span><b>20</b> RAM TO BANK</span><span><b>3</b> DECK LEVELS</span><span><b>9</b> RIVALS ON SHIFT</span></div>
+  <button id="start-button">START THE RAID</button><small>WASD / arrows move · Space jump · R dash · F raid · Shift sprint · right-drag to look</small>
+ </div></div>
+ <div id="win-screen" hidden><div class="start-card"><p class="eyebrow">CONTRACT COMPLETE / DEPOT 07 CLEARED</p><h2>RAM<br/><em>BANKED.</em></h2><p id="win-copy">20 RAM banked. The depot is yours.</p><button id="play-again">RUN IT BACK</button></div></div>
+</section>
+<script type="module" src="/src/main.js"></script>
+</body>
 </html>
