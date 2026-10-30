@@ -1,7 +1,7 @@
 import * as GFX from 'madness-engine/gfx';
 import { createAudio } from 'madness-engine/audio';
 import { createInput } from 'madness-engine/input';
-import { createStage } from 'madness-engine/stage';
+import { createStage, LIGHTS, domeU } from 'madness-engine/stage';
 import { createModel } from 'madness-engine/models/model';
 import { toGround } from 'madness-engine/view';
 import robot from 'madness-engine/characters/robot';
@@ -16,6 +16,7 @@ import { createBuildings, FOOTPRINTS } from 'madness-engine/buildings';
 import { Batch } from 'madness-engine/mesher';
 import { wallMaterial, surfaceMaterial } from 'madness-engine/textures/town/textures';
 import { tiled as tileTownTexture } from 'madness-engine/textures/town/paint';
+import { SURFACES } from 'madness-engine/textures/town/surfaces';
 import { paintRoom } from 'madness-engine/textures/rooms/town';
 import { paintSky } from 'madness-engine/textures/skies/town';
 import './style.css';
@@ -24,7 +25,10 @@ import './style.css';
 // import when the final Sam sculpt is ready; gameplay is decoupled from the cast.
 const host = document.querySelector('#game');
 const stage = await createStage(host, {
-  sky: paintSky((x, z) => (Math.atan2(z, x) / (Math.PI * 2) + 1) % 1),
+  sky: paintSky(domeU),
+  lights: LIGHTS,
+  shadows: true,
+  shadowSize: 2048,
   room: paintRoom(),
   ui: [document.querySelector('#overlay')],
   label: 'ram-stealin-sam',
@@ -58,8 +62,15 @@ const ui = {
   score: document.querySelector('#score-count'),
   raids: document.querySelector('#raid-count'),
   radar: document.querySelector('#radar'),
+  level: document.querySelector('#level-label'),
+  levelName: document.querySelector('#level-name'),
 };
-const TARGET_RAM = 24;
+const LEVELS = [
+  { name: 'HILLSIDE HOMES', kind: 'HOME', target: 16, threat: 1.0 },
+  { name: 'MAIN STREET HEAT', kind: 'BUSINESS', target: 24, threat: 1.25 },
+  { name: 'FULL BLOCK TAKEOVER', kind: 'ALL', target: 36, threat: 1.55 },
+];
+const TOTAL_TARGET_RAM = LEVELS.reduce((sum, level) => sum + level.target, 0);
 const GETAWAY = { x: 0, z: 30.7 };
 let started = false;
 let won = false;
@@ -67,6 +78,7 @@ let toastTimer = 0;
 let attackQueued = false;
 let jumpQueued = false;
 let raidQueued = false;
+let primaryPointer = null;
 
 const audio = createAudio({ storageKey: 'ram-stealin-sam.muted', glue: true });
 function wakeAudio() {
@@ -105,8 +117,10 @@ document.querySelector('#start-button').addEventListener('click', () => {
   wakeAudio();
 });
 document.querySelector('#attack-button').addEventListener('pointerdown', (event) => {
-  event.preventDefault();
-  attackQueued = true;
+  event.preventDefault();attackQueued=true;
+  const nearby=townsfolk.filter(person=>person.hp>0)
+   .sort((a,b)=>Math.hypot(a.x-player.x,a.z-player.z)-Math.hypot(b.x-player.x,b.z-player.z))[0];
+  if(nearby)player.yaw=Math.atan2(nearby.x-player.x,nearby.z-player.z);
   wakeAudio();
 });
 document.querySelector('#jump-button').addEventListener('pointerdown', (event) => {
@@ -118,6 +132,43 @@ document.querySelector('#raid-button').addEventListener('pointerdown', (event) =
   event.preventDefault(); raidQueued = true; wakeAudio();
 });
 document.querySelector('#play-again').addEventListener('click', () => location.reload());
+
+function handlePrimaryClick(){
+ if(!started||won)return;
+ if(nearestProperty()){
+  raidQueued=true;
+ }else{
+  let target=null,best=3.3;
+  for(const person of townsfolk){
+   if(person.hp<=0)continue;
+   const distance=Math.hypot(person.x-player.x,person.z-player.z);
+   if(distance<best){best=distance;target=person;}
+  }
+  if(target)player.yaw=Math.atan2(target.x-player.x,target.z-player.z);
+  attackQueued=true;
+ }
+ wakeAudio();
+}
+host.addEventListener('pointerdown',(event)=>{
+ if(event.pointerType!=='mouse'||event.button!==0)return;
+ primaryPointer={id:event.pointerId,x:event.clientX,y:event.clientY,
+  startedAt:performance.now(),dragged:false};
+});
+host.addEventListener('pointermove',(event)=>{
+ if(!primaryPointer||primaryPointer.id!==event.pointerId)return;
+ if(Math.hypot(event.clientX-primaryPointer.x,event.clientY-primaryPointer.y)>9)primaryPointer.dragged=true;
+});
+host.addEventListener('pointerup',(event)=>{
+ if(!primaryPointer||primaryPointer.id!==event.pointerId)return;
+ const clicked=!primaryPointer.dragged&&performance.now()-primaryPointer.startedAt<650
+  &&Math.hypot(event.clientX-primaryPointer.x,event.clientY-primaryPointer.y)<9;
+ primaryPointer=null;
+ if(clicked)handlePrimaryClick();
+});
+host.addEventListener('pointercancel',(event)=>{
+ if(primaryPointer&&primaryPointer.id===event.pointerId)primaryPointer=null;
+});
+
 
 const mats = {
   ground: new GFX.MeshStandardMaterial({ color: '#263b3a', roughness: 0.94 }),
@@ -154,23 +205,28 @@ function addRing(x, z, radius, material) {
 }
 
 // CALIFORNIA TOWN ----------------------------------------------------------
-const mapSurfaces = {
-  grass: surfaceMaterial(GFX, 'lawn'), road: surfaceMaterial(GFX, 'road'),
-  sidewalk: surfaceMaterial(GFX, 'sidewalk'), concrete: surfaceMaterial(GFX, 'concrete'),
-};
-function tiledSurface(name, rx, rz, tint = '#ffffff') {
-  const base = mapSurfaces[name];
-  return new GFX.MeshPhysicalMaterial({
-    color: tint, map: tileTownTexture(GFX, base.map, rx, rz),
-    bumpMap: tileTownTexture(GFX, base.bumpMap, rx, rz),
-    bumpScale: 1.1, roughness: base.roughness, metalness: base.metalness,
-  });
+mats.roadWhite = new GFX.MeshStandardMaterial({color:'#e8e5da',roughness:0.9});
+const townSurfaceCache=new Map();
+function townSurface(name,width,depth,tint){
+ const key=[name,width,depth,tint||''].join(':');
+ if(townSurfaceCache.has(key))return townSurfaceCache.get(key);
+ const base=surfaceMaterial(GFX,name);
+ const material=base.clone();
+ material.name='town-surface-'+name;
+ material.vertexColors=false;
+ material.map=tileTownTexture(GFX,base.map,width,depth);
+ material.bumpMap=tileTownTexture(GFX,base.bumpMap,width,depth);
+ material.color.set(tint||SURFACES[name]?.top||'#ffffff');
+ material.needsUpdate=true;
+ townSurfaceCache.set(key,material);
+ return material;
 }
-mats.roadWhite = new GFX.MeshStandardMaterial({ color: '#e8e5da', roughness: 0.9 });
-const groundMat = tiledSurface('grass', 18, 18, '#e0e7d0');
-const streetMat = tiledSurface('road', 15, 2.2);
-const walkMat = tiledSurface('sidewalk', 4, 1.5);
-const driveMat = tiledSurface('concrete', 2, 2, '#d1cbbc');
+const groundMat=townSurface('lawn',84,84,'#e0e7d0');
+const streetMat=townSurface('road',78,6.2);
+const streetVerticalMat=townSurface('road',6.2,78);
+const walkMat=townSurface('sidewalk',78,1.25);
+const walkVerticalMat=townSurface('sidewalk',1.25,78);
+const driveMat=townSurface('forecourt',16,8.5);
 function addSurface(w,d,x,z,material,y=0.02) {
   const mesh = new GFX.Mesh(new GFX.PlaneGeometry(w,d), material);
   mesh.rotation.x = -Math.PI/2;
@@ -183,7 +239,7 @@ function addLamp(x,z) {
     new GFX.MeshBasicMaterial({color:'#ffe3a4',toneMapped:false}));
   globe.position.set(x+0.18,2.42,z); scene.add(globe);
 }
-function addRoadStripe(x,z,w,d,material=mats.warning) {
+function addRoadStripe(x,z,w,d,material=mats.roadWhite) {
   addBox(x,0.058,z,w,0.018,d,material,false);
 }
 const ground = new GFX.Mesh(new GFX.PlaneGeometry(84,84),groundMat);
@@ -196,9 +252,9 @@ for(const z of horizontalRoads){
   for(let x=-36;x<=36;x+=5.2)addRoadStripe(x,z,2.1,0.075);
 }
 for(const x of verticalRoads){
-  addSurface(6.2,78,x,0,streetMat,0.019);
-  addSurface(1.25,78,x-3.72,0,walkMat,0.036);
-  addSurface(1.25,78,x+3.72,0,walkMat,0.036);
+  addSurface(6.2,78,x,0,streetVerticalMat,0.019);
+  addSurface(1.25,78,x-3.72,0,walkVerticalMat,0.036);
+  addSurface(1.25,78,x+3.72,0,walkVerticalMat,0.036);
   for(let z=-36;z<=36;z+=5.2)addRoadStripe(x,z,0.075,2.1);
 }
 for(const x of verticalRoads)for(const z of horizontalRoads){
@@ -209,7 +265,7 @@ for(const x of verticalRoads)for(const z of horizontalRoads){
   addLamp(x-4.3,z-4.2);addLamp(x+4.3,z+4.2);
 }
 for(const z of [-21,-7,7,21])for(const x of [-24,-16,-8,8,16,24]){
-  addSurface(5.6,5.3,x,z,tiledSurface('grass',2,2,'#dbe5c7'),0.012);
+  addSurface(5.6,5.3,x,z,townSurface('lawn',5.6,5.3,'#dbe5c7'),0.012);
 }
 addSurface(16,8.5,0,34,driveMat,0.025);
 for(let x=-5.5;x<=5.5;x+=2.75)addRoadStripe(x,33.8,0.075,4.4);
@@ -217,20 +273,32 @@ for(let x=-5.5;x<=5.5;x+=2.75)addRoadStripe(x,33.8,0.075,4.4);
 const buildingLibrary=createBuildings();
 const buildingMaterials=new Map();
 function buildingMaterial(name){
-  if(buildingMaterials.has(name))return buildingMaterials.get(name);
-  let material;
-  if(name==='glass')material=new GFX.MeshPhysicalMaterial({
-    vertexColors:true,color:'#d7e9ee',roughness:0.16,metalness:0.28,clearcoat:0.95,clearcoatRoughness:0.08
+ if(buildingMaterials.has(name))return buildingMaterials.get(name);
+ let material;
+ if(name==='glass'){
+  material=new GFX.MeshPhysicalMaterial({
+   vertexColors:true,color:'#d7e9ee',roughness:0.16,metalness:0.28,
+   clearcoat:0.95,clearcoatRoughness:0.08,envMapIntensity:1.1,
   });
-  else if(name==='glow')material=new GFX.MeshBasicMaterial({vertexColors:true,toneMapped:false});
-  else if(name==='tile')material=surfaceMaterial(GFX,'roof');
-  else if(name==='slate')material=surfaceMaterial(GFX,'flatroof');
-  else {
-    const tex=({plaster:'stucco',plain:'stucco',siding:'clapboard',wood:'timber',timber:'timber',
-      metal:'hull',stone:'stone',rubble:'cliff',hedge:'hedge',cloth:'canvas',brick:'brick',dirt:'dirt'})[name]??'stucco';
-    material=wallMaterial(GFX,tex);
-  }
-  buildingMaterials.set(name,material);return material;
+ }else if(name==='glow'){
+  material=new GFX.MeshBasicMaterial({vertexColors:true,toneMapped:false});
+ }else if(name==='tile'){
+  material=surfaceMaterial(GFX,'roof');
+ }else if(name==='slate'){
+  material=surfaceMaterial(GFX,'flatroof');
+ }else if(name==='plain'){
+  material=surfaceMaterial(GFX,'concrete');
+ }else{
+  const textureByPart={
+   plaster:'stucco',stone:'stone',trim:'timber',rubble:'cliff',
+   wood:'timber',metal:'hull',cloth:'canvas',bark:'timber',
+   thatch:'canvas',hedge:'hedge',timber:'timber',rock:'stone',
+   siding:'clapboard',brick:'brick',
+  };
+  material=wallMaterial(GFX,textureByPart[name]||'stone');
+ }
+ buildingMaterials.set(name,material);
+ return material;
 }
 const BUILDING_SCALE=1.8, cityBatch=new Batch(), parkBatch=new Batch();
 parkBatch.stamp(buildingLibrary.modelFor('park',{variant:3}).parts,0,0,-35,0,2);
@@ -259,7 +327,7 @@ for(const row of rows)row.entries.forEach(([type,label,loot],i)=>{
   cityBatch.stamp(buildingLibrary.modelFor(type,{level:type==='aptblock'?3:2,variant:propertyIndex%8}).parts,x,0,z,yaw,BUILDING_SCALE);
   const fp=FOOTPRINTS[type]??[2,2],halfW=fp[0]*0.45*BUILDING_SCALE,halfD=fp[1]*0.42*BUILDING_SCALE;
   const front=fp[1]*0.38*BUILDING_SCALE+0.78,fx=Math.sin(yaw),fz=Math.cos(yaw);
-  properties.push({id:propertyIndex++,type,label,kind:row.kind,loot,x,z,yaw,halfW,halfD,
+  properties.push({id:propertyIndex++,type,label,kind:row.kind,baseLoot:loot,loot,x,z,yaw,halfW,halfD,
     doorX:x+fx*front,doorZ:z+fz*front,raided:false});
 });
 for(const [name,acc] of cityBatch.accs){
@@ -280,73 +348,104 @@ function canMoveTo(x,z){
   return true;
 }
 
-// Shared grid navigation from the player's current tile. Walkability is
-// sampled from the same expanded building footprints used by collision.
-const NAV_MIN=-40,NAV_SIZE=81,NAV_COUNT=NAV_SIZE*NAV_SIZE;
-const navWalkable=new Uint8Array(NAV_COUNT),navDistances=new Int16Array(NAV_COUNT),navQueue=new Int16Array(NAV_COUNT);
+// Shared half-metre navigation field; it follows the actual building collision.
+const NAV_MIN=-40,NAV_STEP=0.5,NAV_SIZE=161,NAV_COUNT=NAV_SIZE*NAV_SIZE;
+const navWalkable=new Uint8Array(NAV_COUNT);
+const navDistance=new Int16Array(NAV_COUNT);
+const navQueue=new Int32Array(NAV_COUNT);
+const NAV_DIRECTIONS=[[1,0],[-1,0],[0,1],[0,-1]];
 let navGoal=-1;
-function navIndex(x,z){return (z-NAV_MIN)*NAV_SIZE+(x-NAV_MIN);}
-function navWorld(i){return {x:i%NAV_SIZE+NAV_MIN,z:Math.floor(i/NAV_SIZE)+NAV_MIN,index:i};}
-for(let z=NAV_MIN;z<=40;z++)for(let x=NAV_MIN;x<=40;x++)navWalkable[navIndex(x,z)]=canMoveTo(x,z)?1:0;
+function navIndex(ix,iz){return iz*NAV_SIZE+ix;}
+function navCell(x,z){
+ const ix=Math.max(0,Math.min(NAV_SIZE-1,Math.round((x-NAV_MIN)/NAV_STEP)));
+ const iz=Math.max(0,Math.min(NAV_SIZE-1,Math.round((z-NAV_MIN)/NAV_STEP)));
+ return {ix,iz,index:navIndex(ix,iz)};
+}
+function navPosition(ix,iz){
+ return {x:NAV_MIN+ix*NAV_STEP,z:NAV_MIN+iz*NAV_STEP,index:navIndex(ix,iz)};
+}
+for(let iz=0;iz<NAV_SIZE;iz++)for(let ix=0;ix<NAV_SIZE;ix++){
+ const p=navPosition(ix,iz);navWalkable[p.index]=canMoveTo(p.x,p.z)?1:0;
+}
 function nearestWalkableCell(x,z){
- const cx=Math.max(NAV_MIN,Math.min(40,Math.round(x))),cz=Math.max(NAV_MIN,Math.min(40,Math.round(z)));
- for(let r=0;r<=8;r++){
-  let best=null,score=Infinity;
-  for(let dz=-r;dz<=r;dz++)for(let dx=-r;dx<=r;dx++){
-   if(r&&Math.max(Math.abs(dx),Math.abs(dz))!==r)continue;
-   const nx=cx+dx,nz=cz+dz;
-   if(nx<NAV_MIN||nx>40||nz<NAV_MIN||nz>40)continue;
-   const index=navIndex(nx,nz);if(!navWalkable[index])continue;
-   const d=dx*dx+dz*dz;if(d<score){score=d;best={x:nx,z:nz,index};}
+ const origin=navCell(x,z);
+ for(let radius=0;radius<=18;radius++){
+  let best=null,bestScore=Infinity;
+  for(let dz=-radius;dz<=radius;dz++)for(let dx=-radius;dx<=radius;dx++){
+   if(radius>0&&Math.max(Math.abs(dx),Math.abs(dz))!==radius)continue;
+   const ix=origin.ix+dx,iz=origin.iz+dz;
+   if(ix<0||ix>=NAV_SIZE||iz<0||iz>=NAV_SIZE)continue;
+   const index=navIndex(ix,iz);if(!navWalkable[index])continue;
+   const score=dx*dx+dz*dz;
+   if(score<bestScore){bestScore=score;best=navPosition(ix,iz);}
   }
   if(best)return best;
  }
  return null;
 }
-function rebuildNavigation(x,z){
- const goal=nearestWalkableCell(x,z);
- if(!goal||goal.index===navGoal)return;
- navGoal=goal.index;navDistances.fill(-1);
- let head=0,tail=0;navQueue[tail++]=goal.index;navDistances[goal.index]=0;
+function rebuildNavigation(goalX,goalZ){
+ const goal=nearestWalkableCell(goalX,goalZ);if(!goal||goal.index===navGoal)return;
+ navGoal=goal.index;navDistance.fill(-1);
+ let head=0,tail=0;navQueue[tail++]=goal.index;navDistance[goal.index]=0;
  while(head<tail){
-  const here=navWorld(navQueue[head++]),distance=navDistances[here.index]+1;
-  const adjacent=[[here.x+1,here.z],[here.x-1,here.z],[here.x,here.z+1],[here.x,here.z-1]];
-  for(const [nx,nz] of adjacent){
-   if(nx<NAV_MIN||nx>40||nz<NAV_MIN||nz>40)continue;
+  const index=navQueue[head++],ix=index%NAV_SIZE,iz=Math.floor(index/NAV_SIZE);
+  const nextDistance=navDistance[index]+1;
+  for(const [dx,dz] of NAV_DIRECTIONS){
+   const nx=ix+dx,nz=iz+dz;
+   if(nx<0||nx>=NAV_SIZE||nz<0||nz>=NAV_SIZE)continue;
    const next=navIndex(nx,nz);
-   if(!navWalkable[next]||navDistances[next]!==-1)continue;
-   navDistances[next]=distance;navQueue[tail++]=next;
+   if(!navWalkable[next]||navDistance[next]!==-1)continue;
+   navDistance[next]=nextDistance;navQueue[tail++]=next;
   }
  }
 }
 function nextNavigationWaypoint(x,z){
- const here=nearestWalkableCell(x,z);if(!here)return null;
- const d=navDistances[here.index];if(d<0)return null;
- if(d===0)return {x:player.x,z:player.z};
- let best=here.index,bestD=d;
- for(const [nx,nz] of [[here.x+1,here.z],[here.x-1,here.z],[here.x,here.z+1],[here.x,here.z-1]]){
-  if(nx<NAV_MIN||nx>40||nz<NAV_MIN||nz>40)continue;
-  const next=navIndex(nx,nz),nd=navDistances[next];
-  if(nd>=0&&nd<bestD){best=next;bestD=nd;}
+ const cell=nearestWalkableCell(x,z);if(!cell)return null;
+ const distance=navDistance[cell.index];if(distance<0)return null;
+ if(distance===0)return {x:player.x,z:player.z};
+ let best=null,bestDistance=distance;
+ for(const [dx,dz] of NAV_DIRECTIONS){
+  const ix=cell.ix+dx,iz=cell.iz+dz;
+  if(ix<0||ix>=NAV_SIZE||iz<0||iz>=NAV_SIZE)continue;
+  const index=navIndex(ix,iz),d=navDistance[index];
+  if(d>=0&&d<bestDistance){bestDistance=d;best=navPosition(ix,iz);}
  }
- return best===here.index?null:navWorld(best);
+ return best;
 }
-function moveTownsperson(person,tx,tz,speed,dt){
- const dx=tx-person.x,dz=tz-person.z,d=Math.hypot(dx,dz);
- if(d<0.12)return false;
- const step=Math.min(d,speed*dt),nx=person.x+dx/d*step,nz=person.z+dz/d*step;
- const ox=person.x,oz=person.z;
- if(canMoveTo(nx,person.z))person.x=nx;
- if(canMoveTo(person.x,nz))person.z=nz;
- return Math.hypot(person.x-ox,person.z-oz)>0.0001;
+function segmentIsClear(x0,z0,x1,z1){
+ const distance=Math.hypot(x1-x0,z1-z0),steps=Math.max(1,Math.ceil(distance/0.2));
+ for(let i=1;i<=steps;i++){
+  const t=i/steps;if(!canMoveTo(x0+(x1-x0)*t,z0+(z1-z0)*t))return false;
+ }
+ return true;
+}
+function moveTownsperson(person,targetX,targetZ,speed,dt){
+ const dx=targetX-person.x,dz=targetZ-person.z,distance=Math.hypot(dx,dz);
+ if(distance<0.12)return false;
+ const travel=Math.min(distance,speed*dt),steps=Math.max(1,Math.ceil(travel/0.12)),step=travel/steps;
+ let moved=false;
+ for(let i=0;i<steps;i++){
+  const angle=Math.atan2(dx,dz);
+  const nx=person.x+Math.sin(angle)*step,nz=person.z+Math.cos(angle)*step;
+  if(canMoveTo(nx,nz)){person.x=nx;person.z=nz;moved=true;continue;}
+  const xOnly=person.x+Math.sin(angle)*step,zOnly=person.z+Math.cos(angle)*step;
+  if(canMoveTo(xOnly,person.z)){person.x=xOnly;moved=true;}
+  else if(canMoveTo(person.x,zOnly)){person.z=zOnly;moved=true;}
+  else break;
+ }
+ return moved;
 }
 function chooseWanderTarget(person){
- for(let i=0;i<10;i++){
-  const angle=Math.random()*Math.PI*2,radius=0.7+Math.random()*1.8;
+ for(let attempt=0;attempt<18;attempt++){
+  const angle=Math.random()*Math.PI*2,radius=1+Math.random()*3.5;
   const x=person.homeX+Math.cos(angle)*radius,z=person.homeZ+Math.sin(angle)*radius;
-  if(canMoveTo(x,z)){person.wanderX=x;person.wanderZ=z;person.wanderTimer=2.4+Math.random()*2.2;return;}
+  if(canMoveTo(x,z)&&segmentIsClear(person.x,person.z,x,z)){
+   person.wanderX=x;person.wanderZ=z;person.wanderTimer=2.2+Math.random()*2.5;return;
+  }
  }
- person.wanderX=person.homeX;person.wanderZ=person.homeZ;person.wanderTimer=1.2;
+ const safe=nearestWalkableCell(person.x,person.z);
+ person.wanderX=safe?safe.x:person.homeX;person.wanderZ=safe?safe.z:person.homeZ;
+ person.wanderTimer=1.2;
 }
 addBox(0,0.65,35,2.8,1.25,4.2,mats.dark);
 addBox(0,1.35,35,2.45,0.32,2.35,mats.dark);
@@ -373,7 +472,8 @@ scene.add(sam.group);
 sam.group.scale.setScalar(0.98);
 const START = { x: -3.5, z: 32 };
 const player={x:START.x,z:START.z,y:surfaceAt(START.x,START.z),vy:0,yaw:Math.PI,
- health:100,ram:0,delivered:0,score:0,raids:0,kills:0,invulnerable:0,attackCooldown:0,grounded:true,combo:0,comboTimer:0};
+ health:100,ram:0,delivered:0,level:1,levelDelivered:0,levelLootReleased:0,
+ score:0,raids:0,kills:0,invulnerable:0,attackCooldown:0,grounded:true,combo:0,comboTimer:0};
 sam.group.position.set(player.x, player.y, player.z);
 
 
@@ -402,13 +502,17 @@ function spawnMedkit(x,z){
 [[-30,-4],[30,4],[-12,28],[12,-28]].forEach(([x,z])=>spawnMedkit(x,z));
 const citizenCast=[neighbour,vendor,neighbour,critic,cop,vendor,security,neighbour,cop,punk,vendor,security,neighbour,cop];
 const citizenSpots=[[-28,-3],[-28,10],[28,-10],[28,3],[-12,-3],[12,3],[-12,14],[12,-14],[-6,28],[6,-28],[-28,20],[28,-20],[-6,3],[6,-3]];
-const townsfolk=citizenSpots.map(([x,z],i)=>{
+const townsfolk=citizenSpots.map(([spawnX,spawnZ],i)=>{
+ const safeSpawn=nearestWalkableCell(spawnX,spawnZ);
+ const x=safeSpawn?safeSpawn.x:spawnX,z=safeSpawn?safeSpawn.z:spawnZ;
  const model=createModel(GFX,citizenCast[i%citizenCast.length],{detail:0.72});scene.add(model.group);
  model.group.scale.setScalar(i%5===4?0.96:0.9);
  const isCop=i%5===4||i===8||i===13,isVendor=i%4===1,hp=isCop?3:2;
- const baseSpeed=isCop?3:isVendor?2.2:2.55,baseDamage=isCop?16:isVendor?10:12;
- const person={model,x,z,homeX:x,homeZ:z,hp,maxHp:hp,baseHp:hp,kind:isCop?'COP':isVendor?'VENDOR':'NEIGHBOUR',
-  speed:baseSpeed,baseSpeed,damage:baseDamage,baseDamage,drop:isCop?3:2,
+ const isSecurity=!isCop&&citizenCast[i%citizenCast.length]===security;
+ const baseSpeed=isCop?3:isVendor?2.2:2.55,baseDamage=isCop?16:isSecurity?14:isVendor?10:12;
+ const person={model,x,z,homeX:x,homeZ:z,hp,maxHp:hp,baseHp:hp,
+  kind:isCop?'COP':isSecurity?'SECURITY':isVendor?'VENDOR':'NEIGHBOUR',
+  speed:baseSpeed,baseSpeed,damage:baseDamage,baseDamage,
   aggro:false,stun:0,windup:0,attackTimer:0,respawn:0,phase:i*1.31,
   wanderX:x,wanderZ:z,wanderTimer:Math.random()*1.5};
  model.group.position.set(x,surfaceAt(x,z),z);return person;
@@ -422,9 +526,19 @@ function alertTownfolk(property){
 }
 let elapsed=0,swingTime=0,raidPrompt=null;
 stage.target.set(player.x,player.y+1.2,player.z);stage.view.zoomBy(1.12);
+function activeProperty(property){
+ const kind=LEVELS[player.level-1].kind;
+ return kind==='ALL'||property.kind===kind;
+}
 function nearestProperty(){
+ const level=LEVELS[player.level-1];
+ if(player.levelLootReleased>=level.target-player.levelDelivered)return null;
  let nearest=null,best=3.35;
- for(const p of properties){if(p.raided)continue;const d=Math.hypot(player.x-p.doorX,player.z-p.doorZ);if(d<best){best=d;nearest=p;}}
+ for(const p of properties){
+  if(p.raided||!activeProperty(p))continue;
+  const distance=Math.hypot(player.x-p.doorX,player.z-p.doorZ);
+  if(distance<best){best=distance;nearest=p;}
+ }
  return nearest;
 }
 const radarCtx=ui.radar?.getContext('2d');
@@ -436,7 +550,10 @@ function drawRadar(){
  c.strokeStyle='#3a4b50';c.lineWidth=6;
  for(const z of horizontalRoads){c.beginPath();c.moveTo(px(-39),pz(z));c.lineTo(px(39),pz(z));c.stroke();}
  for(const x of verticalRoads){c.beginPath();c.moveTo(px(x),pz(-39));c.lineTo(px(x),pz(39));c.stroke();}
- for(const p of properties){c.fillStyle=p.raided?'#5b6465':p.kind==='HOME'?'#e0b879':'#62c5d1';c.fillRect(px(p.x)-3,pz(p.z)-3,6,6);}
+ for(const p of properties){
+  c.fillStyle=p.raided?'#5b6465':!activeProperty(p)?'#354346':p.kind==='HOME'?'#e0b879':'#62c5d1';
+  c.fillRect(px(p.x)-3,pz(p.z)-3,6,6);
+ }
  for(const person of townsfolk)if(person.hp>0){
   c.fillStyle=person.aggro?'#ff5c57':'#a6b8b4';c.beginPath();c.arc(px(person.x),pz(person.z),person.aggro?2.8:1.7,0,Math.PI*2);c.fill();
  }
@@ -445,24 +562,30 @@ function drawRadar(){
  c.fillStyle='#fff';c.beginPath();c.arc(px(player.x),pz(player.z),3.4,0,Math.PI*2);c.fill();
 }
 function updateHud(){
+ const level=LEVELS[player.level-1];
  ui.ram.textContent=String(player.ram).padStart(2,'0');
- ui.delivered.textContent=`${String(player.delivered).padStart(2,'0')} / ${TARGET_RAM}`;
- ui.health.style.width=`${Math.max(0,player.health)}%`;
+ ui.delivered.textContent=String(player.delivered).padStart(2,'0')+' / '+TOTAL_TARGET_RAM;
+ ui.level.textContent='0'+player.level+' / 03';
+ ui.levelName.textContent='LEVEL 0'+player.level+' / '+level.name;
+ ui.health.style.width=Math.max(0,player.health)+'%';
  ui.health.style.background=player.health<35?'#ff655c':'#a6ff52';
  ui.score.textContent=String(player.score).padStart(5,'0');
- ui.raids.textContent=`${player.raids} / ${properties.length}`;
+ ui.raids.textContent=player.raids+' / '+properties.length;
  raidPrompt=nearestProperty();
  if(raidPrompt){
-  ui.objective.textContent=`PRESS E TO RAID: ${raidPrompt.label.toUpperCase()}`;
+  ui.objective.textContent='LEFT CLICK / E TO RAID: '+raidPrompt.label.toUpperCase();
   ui.status.textContent=raidPrompt.kind==='HOME'
-   ?`Private residence • estimated stash: ${raidPrompt.loot} RAM • neighbours are nearby.`
-   :`Business premises • estimated stash: ${raidPrompt.loot} RAM • the alarm will draw attention.`;
- }else if(player.ram>=TARGET_RAM){
-  ui.objective.textContent='Take the RAM to the getaway van.';
-  ui.status.textContent=`You are carrying ${player.ram} RAM. Lose the crowd and reach the green drop zone.`;
+   ?'Residence stash: '+raidPrompt.loot+' RAM • neighbours will respond.'
+   :'Business stash: '+raidPrompt.loot+' RAM • alarms draw a stronger response.';
+ }else if(player.levelLootReleased>=level.target-player.levelDelivered){
+  ui.objective.textContent='COLLECT THE LOOSE RAM AND RETURN TO THE VAN';
+  ui.status.textContent='Level '+player.level+' stash: '+(player.levelDelivered+player.ram)+' / '+level.target+' RAM.';
+ }else if(player.ram>0){
+  ui.objective.textContent='RETURN TO THE VAN AND FENCE THE STASH';
+  ui.status.textContent='Level '+player.level+' stash: '+(player.levelDelivered+player.ram)+' / '+level.target+' RAM.';
  }else{
-  ui.objective.textContent=`Raid homes and businesses. Steal ${TARGET_RAM-player.delivered} more RAM.`;
-  ui.status.textContent=player.raids?`${player.raids} properties hit. Watch for angry neighbours and police.`:'Find a front door and press E. F fights back when the locals come out.';
+  ui.objective.textContent='CLEAR '+level.name+': FENCE '+level.target+' RAM';
+  ui.status.textContent='Find a highlighted home or business. Left-click its entrance to raid it.';
  }
  drawRadar();
 }
@@ -470,16 +593,20 @@ updateHud();
 function raidProperty(){
  const property=nearestProperty();
  if(!property){showToast('GET CLOSER TO AN UNRAIDED FRONT DOOR');return;}
- property.raided=true;player.raids++;player.score+=property.loot*45;
+ const level=LEVELS[player.level-1];
+ const remaining=Math.max(0,level.target-player.levelDelivered-player.levelLootReleased);
+ const stash=Math.min(property.loot,remaining);
+ if(stash<=0){showToast('ALL LEVEL RAM FOUND — RETURN TO THE VAN');return;}
+ property.raided=true;player.raids++;player.score+=stash*45;player.levelLootReleased+=stash;
  const sideX=Math.cos(property.yaw),sideZ=-Math.sin(property.yaw);
- for(let i=0;i<property.loot;i++){
+ for(let i=0;i<stash;i++){
   const lane=(i%3)-1,row=Math.floor(i/3);
   spawnRam(property.doorX+sideX*lane*0.56+Math.sin(row*1.9)*0.16,
    property.doorZ+sideZ*lane*0.56+(row%2)*0.38,1);
  }
  effects.ring(property.doorX,0,property.doorZ,{colour:'#a6ff52',reach:2.8,life:0.55});
  sparkBurst(property.doorX,0.6,property.doorZ,22);alertTownfolk(property);
- showToast(`${property.kind} RAIDED: ${property.label.toUpperCase()}  +${property.loot} RAM`);
+ showToast(property.kind+' RAIDED: '+property.label.toUpperCase()+'  +'+stash+' RAM');
  tone(560,0.18,0.2);updateHud();
 }
 
@@ -502,8 +629,7 @@ function attack(){
   sparkBurst(person.x,0.78,person.z,8);hits++;
   if(person.hp<=0){
    person.model.group.visible=false;person.respawn=14;player.kills++;player.score+=person.kind==='COP'?320:240;
-   for(let i=0;i<person.drop;i++)spawnRam(person.x+(i-(person.drop-1)/2)*0.34,person.z+0.3,1);
-   showToast(person.kind+' KNOCKED OUT  +'+person.drop+' RAM');tone(520,0.17,0.2);
+   showToast(person.kind+' KNOCKED OUT  +SCORE');tone(520,0.17,0.2);
   }else showToast(player.combo===3?'HARD HIT — THEY STAGGER':'HIT — KEEP PRESSING');
  }
  if(!hits)showToast('NO ONE IN REACH — GET CLOSER');
@@ -520,15 +646,53 @@ function hurtPlayer(person,distance){
  tone(110,0.16,0.18);stage.shake=Math.max(stage.shake,0.18);updateHud();
  if(player.health<=0)respawnPlayer();
 }
+function advanceLevel(){
+ player.level++;
+ player.levelDelivered=0;
+ player.levelLootReleased=0;
+ if(player.level===3){
+  for(const property of properties){
+   property.raided=false;
+   property.loot=Math.ceil(property.baseLoot*1.35);
+  }
+ }
+ const level=LEVELS[player.level-1];
+ for(const person of townsfolk){
+  const enforcement=person.kind==='COP'||person.kind==='SECURITY';
+  person.maxHp=Math.ceil(person.baseHp*(1+0.25*(player.level-1)));
+  person.hp=person.maxHp;
+  person.speed=person.baseSpeed*level.threat;
+  person.damage=Math.round(person.baseDamage*(1+0.18*(player.level-1)));
+  person.aggro=player.level===3||(player.level===2&&enforcement);
+  person.stun=0;person.windup=0;person.attackTimer=0;person.respawn=0;
+  person.x=person.homeX;person.z=person.homeZ;
+  person.model.group.visible=true;person.wanderTimer=0;
+ }
+ navGoal=-1;
+ player.health=Math.min(100,player.health+25);
+ player.invulnerable=1.8;
+ showToast('LEVEL 0'+player.level+' — '+level.name);
+ updateHud();
+}
+
 function deliverRam(){
  if(player.ram<=0||won)return;
- const amount=player.ram;player.ram=0;player.delivered+=amount;player.score+=amount*80;
- showToast('STASH SECURED: '+amount+' RAM — '+player.delivered+'/'+TARGET_RAM);
+ const level=LEVELS[player.level-1];
+ const amount=Math.min(player.ram,level.target-player.levelDelivered);
+ if(amount<=0)return;
+ player.ram-=amount;
+ player.levelDelivered+=amount;
+ player.delivered+=amount;
+ player.score+=amount*80;
+ showToast('STASH FENCED: '+amount+' RAM — '+player.levelDelivered+'/'+level.target);
  effects.ring(GETAWAY.x,0,GETAWAY.z,{colour:'#a6ff52',reach:3.8,life:0.6});
  sparkBurst(GETAWAY.x,0.55,GETAWAY.z,26);tone(720,0.2,0.18);
- if(player.delivered>=TARGET_RAM){
-  won=true;ui.winCopy.textContent=player.delivered+' RAM fenced • '+player.raids+' properties raided • '+player.kills+' townsfolk knocked out • score '+player.score;
-  ui.win.hidden=false;
+ if(player.levelDelivered>=level.target){
+  if(player.level===LEVELS.length){
+   won=true;
+   ui.winCopy.textContent=player.delivered+' RAM fenced • all three levels cleared • '+player.raids+' property raids • '+player.kills+' townsfolk knockouts • score '+player.score;
+   ui.win.hidden=false;
+  }else advanceLevel();
  }
  updateHud();
 }
