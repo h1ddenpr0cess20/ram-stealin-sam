@@ -9,9 +9,7 @@ import punk from 'madness-engine/characters/punk';
 import critic from 'madness-engine/characters/critic';
 import { paintRoom } from 'madness-engine/textures/rooms/studio';
 import { paintSky } from 'madness-engine/textures/skies/haze';
-import { createBuildings } from 'madness-engine/buildings';
-import { Batch } from 'madness-engine/mesher';
-import { grass as paintGrass, concrete as paintConcrete } from 'madness-engine/textures/painters';
+import { asphalt as paintAsphalt, concrete as paintConcrete, plate as paintPlate, grate as paintGrate, tiled } from 'madness-engine/textures/painters';
 import './style.css';
 
 // Temporary player cast: the engine's tin-can Robot Waiter. Replace this
@@ -139,70 +137,66 @@ function addRing(x, z, radius, material) {
   return mesh;
 }
 
-// A broad city plaza with raised rooftops, server platforms and jump routes.
-const groundTexture = paintGrass(GFX);
-mats.ground.map = groundTexture.map;
-mats.ground.bumpMap = groundTexture.bump;
-mats.ground.bumpScale = 0.16;
-mats.ground.needsUpdate = true;
+// Rebuilt as a platform-only industrial parkour arena. The routes form a
+// readable loop around a central hub; every landing is a playable surface.
+const asphaltTexture = paintAsphalt(GFX);
 const concreteTexture = paintConcrete(GFX);
-mats.concrete.map = concreteTexture.map;
-mats.concrete.bumpMap = concreteTexture.bump;
-mats.concrete.bumpScale = 0.11;
-mats.concrete.needsUpdate = true;
+const plateTexture = paintPlate(GFX);
+const grateTexture = paintGrate(GFX);
+const surfaceMaterial = (paint, tint, roughness, metalness, repeat = 1) => new GFX.MeshStandardMaterial({
+  color: tint,
+  map: tiled(GFX, paint.map, repeat, repeat),
+  bumpMap: tiled(GFX, paint.bump, repeat, repeat),
+  bumpScale: 0.075,
+  roughness,
+  metalness,
+});
+mats.ground = surfaceMaterial(asphaltTexture, '#778287', 0.94, 0.04, 8);
 const floor = new GFX.Mesh(new GFX.PlaneGeometry(48, 48), mats.ground);
 floor.rotation.x = -Math.PI / 2;
 floor.position.y = 0;
 floor.receiveShadow = true;
 scene.add(floor);
-const platforms = [
-  { x: -9, z: 5, w: 6, d: 6, h: 2.0 },
-  { x: -1, z: -3, w: 6, d: 6, h: 2.15 },
-  { x: 8, z: 3, w: 7, d: 7, h: 1.55 },
-  { x: -10, z: -9, w: 7, d: 7, h: 1.25 },
-  { x: 2, z: 11, w: 8, d: 4, h: 1.8 },
-  { x: 9, z: -12, w: 5, d: 5, h: 2.25 },
-];
-for (const p of platforms) {
-  addBox(p.x, p.h / 2, p.z, p.w, p.h, p.d, mats.concrete);
-  addBox(p.x, p.h + 0.045, p.z, p.w + 0.08, 0.09, p.d + 0.08, mats.dark, false);
-  addBox(p.x, p.h + 0.1, p.z - p.d / 2 + 0.08, p.w - 0.2, 0.045, 0.07, mats.trim, false);
-}
 
+const platforms = [
+  // Central transfer hub and four raised approach lanes.
+  { x: 0, z: 0, w: 10, d: 9, h: 1.15, finish: 'concrete' },
+  { x: -7, z: 0, w: 4, d: 3.2, h: 1.2, finish: 'grate' },
+  { x: 7, z: 0, w: 4, d: 3.2, h: 1.2, finish: 'grate' },
+  { x: 0, z: -6.5, w: 3.2, d: 4, h: 1.25, finish: 'plate' },
+  { x: 0, z: 6.5, w: 3.2, d: 4, h: 1.25, finish: 'plate' },
+  // Four distinct outer decks create a continuous circuit with varied jumps.
+  { x: -12, z: 0, w: 6, d: 7, h: 1.55, finish: 'plate' },
+  { x: 12, z: 0, w: 6, d: 7, h: 1.5, finish: 'concrete' },
+  { x: 0, z: -12, w: 8, d: 6, h: 1.8, finish: 'grate' },
+  { x: 0, z: 12, w: 8, d: 6, h: 1.45, finish: 'plate' },
+  // Corner stepping decks are optional high-risk shortcuts.
+  { x: -12, z: -12, w: 5.5, d: 5.5, h: 2.05, finish: 'grate' },
+  { x: 12, z: -12, w: 5.5, d: 5.5, h: 1.95, finish: 'plate' },
+  { x: -12, z: 12, w: 5.5, d: 5.5, h: 1.85, finish: 'concrete' },
+  { x: 12, z: 12, w: 5.5, d: 5.5, h: 2.1, finish: 'grate' },
+];
+const finishes = {
+  concrete: surfaceMaterial(concreteTexture, '#a0a9aa', 0.9, 0.02, 2),
+  plate: surfaceMaterial(plateTexture, '#9aa6aa', 0.48, 0.62, 2),
+  grate: surfaceMaterial(grateTexture, '#7d8c91', 0.66, 0.42, 2),
+};
+for (const p of platforms) {
+  addBox(p.x, p.h / 2, p.z, p.w, p.h, p.d, mats.dark, false);
+  const top = new GFX.Mesh(new GFX.PlaneGeometry(p.w - 0.12, p.d - 0.12), finishes[p.finish]);
+  top.rotation.x = -Math.PI / 2;
+  top.position.set(p.x, p.h + 0.012, p.z);
+  top.receiveShadow = true;
+  scene.add(top);
+  // Four thin edge rails clarify the platform silhouette without adding buildings.
+  const edgeY = p.h + 0.035;
+  addBox(p.x, edgeY, p.z - p.d / 2 + 0.045, p.w - 0.12, 0.055, 0.07, mats.trim, false);
+  addBox(p.x, edgeY, p.z + p.d / 2 - 0.045, p.w - 0.12, 0.055, 0.07, mats.trim, false);
+  addBox(p.x - p.w / 2 + 0.045, edgeY, p.z, 0.07, 0.055, p.d - 0.12, mats.trim, false);
+  addBox(p.x + p.w / 2 - 0.045, edgeY, p.z, 0.07, 0.055, p.d - 0.12, mats.trim, false);
+}
 function insideFootprint(x, z, object) {
   return Math.abs(x - object.x) <= object.w / 2 && Math.abs(z - object.z) <= object.d / 2;
-}
-
-// Dress the plaza with the engine's authored procedural buildings. The batch
-// combines their material parts into a small number of draw calls.
-const buildingSolids = [];
-const buildingLibrary = createBuildings();
-const cityBatch = new Batch();
-const cityLots = [
-  { type: 'house', x: -17, z: -7, yaw: 0, w: 3.8, d: 3.8 },
-  { type: 'shop', x: -17, z: 7, yaw: Math.PI / 2, w: 3.8, d: 3.8 },
-  { type: 'workshop', x: 17, z: 12, yaw: Math.PI, w: 3.8, d: 3.8 },
-  { type: 'townhouse', x: -6, z: -17, yaw: 0, w: 3.8, d: 5.8 },
-  { type: 'cottage', x: 6, z: 18, yaw: Math.PI / 2, w: 3.8, d: 3.8 },
-  { type: 'market', x: -2, z: -13, yaw: 0, w: 5.8, d: 5.8 },
-];
-for (const [i, lot] of cityLots.entries()) {
-  cityBatch.stamp(buildingLibrary.modelFor(lot.type, { variant: i + 2 }).parts, lot.x, 0, lot.z, lot.yaw);
-  buildingSolids.push({ x: lot.x, z: lot.z, w: lot.w, d: lot.d, h: 3.8 });
-}
-for (const [materialName, accumulator] of cityBatch.accs) {
-  const geometry = accumulator.geometry(GFX);
-  if (!geometry) continue;
-  const material = new GFX.MeshStandardMaterial({
-    color: '#ffffff',
-    vertexColors: true,
-    roughness: materialName === 'glass' || materialName === 'metal' ? 0.48 : 0.9,
-    metalness: materialName === 'metal' ? 0.28 : 0.02,
-  });
-  const mesh = new GFX.Mesh(geometry, material);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  scene.add(mesh);
 }
 function surfaceAt(x, z) {
   let height = 0;
@@ -211,46 +205,22 @@ function surfaceAt(x, z) {
   }
   return height;
 }
-// Raised platforms and office blocks are solid from their bases to their tops.
-// Axis-separated resolution lets the player slide along their edges.
+// Platform sides block movement until Sam is high enough to clear their tops.
 function canMoveTo(x, z, feetY) {
   for (const p of platforms) {
     if (insideFootprint(x, z, p) && feetY < p.h + 0.09 - 0.18) return false;
   }
-  for (const b of buildingSolids) {
-    if (insideFootprint(x, z, b) && feetY < b.h - 0.12) return false;
-  }
   return true;
 }
 
-// Distant office blocks and a towering glass data center.
-const skylineBuildings = [
-  [-20, -15, 5, 7, 9], [-19, 1, 6, 6, 7], [-20, 17, 7, 6, 11],
-  [20, 16, 5, 7, 10], [20, -1, 6, 6, 8], [3, -21, 7, 4, 7],
-  [-7, 21, 8, 4, 6], [19, -20, 5, 5, 12],
-];
-for (const [x, z, w, d, h] of skylineBuildings) {
-  buildingSolids.push({ x, z, w, d, h });
-  addBox(x, h / 2, z, w, h, d, mats.dark);
-  for (let y = 1.5; y < h - 0.5; y += 1.6) {
-    for (let col = -1; col <= 1; col++) {
-      addBox(x + col * (w / 3), y, z + d / 2 + 0.025, 0.58, 0.76, 0.05, mats.glass, false);
-    }
-  }
-}
-buildingSolids.push({ x: DATA_CENTER.x, z: DATA_CENTER.z, w: 6.8, d: 6.8, h: 8.4 });
-addBox(DATA_CENTER.x, 4.2, DATA_CENTER.z, 6.8, 8.4, 6.8, mats.dark);
-addBox(DATA_CENTER.x, 8.5, DATA_CENTER.z, 7.1, 0.22, 7.1, mats.trim);
-for (let y = 1.2; y < 8; y += 1.45) {
-  for (let col = -1; col <= 1; col++) {
-    addBox(DATA_CENTER.x + col * 1.8, y, DATA_CENTER.z + 3.43, 1.15, 0.8, 0.06, mats.glass, false);
-  }
-}
+// The destination is a ground-level upload terminal, not a building.
 const deliveryPad = addCylinder(DATA_CENTER.x, 0.05, DATA_CENTER.z + 5.4, 2.5, 0.1, mats.trim, 48);
-deliveryPad.material = new GFX.MeshStandardMaterial({ color: '#a6ff52', emissive: '#4d9b1c', emissiveIntensity: 0.7, transparent: true, opacity: 0.62 });
+deliveryPad.material = new GFX.MeshStandardMaterial({
+  color: '#a6ff52', emissive: '#4d9b1c', emissiveIntensity: 0.7,
+  transparent: true, opacity: 0.62,
+});
 addRing(DATA_CENTER.x, DATA_CENTER.z + 5.4, 2.8, mats.trim);
 addBox(DATA_CENTER.x, 0.28, DATA_CENTER.z + 5.4, 1.0, 0.48, 0.85, mats.dark);
-
 // The player's model is deliberately replaceable: this cast member is a stand-in.
 const sam = createModel(GFX, robot, { detail: 0.86 });
 scene.add(sam.group);
