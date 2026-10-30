@@ -12,12 +12,12 @@ npm run dev
 ## Controls
 
 - WASD / arrow keys: move
-- Mouse drag: orbit camera
+- Right/middle mouse drag: orbit camera
 - Space: jump
-- E / F: RAM raid (close-range attack)
+- F: RAM raid (close-range attack)
 - Shift: sprint
 - M: mute audio
-- Mouse drag: orbit the camera
+- Mouse drag on the arena: move toward the pointer
 
 Collect RAM sticks around the plaza and from knocked-out opponents. Carry it to the glowing delivery pad at the data center. The target is 20 RAM delivered.
 

@@ -94,6 +94,11 @@ document.querySelector('#attack-button').addEventListener('pointerdown', (event)
   attackQueued = true;
   wakeAudio();
 });
+document.querySelector('#jump-button').addEventListener('pointerdown', (event) => {
+  event.preventDefault();
+  jumpQueued = true;
+  wakeAudio();
+});
 document.querySelector('#play-again').addEventListener('click', () => location.reload());
 
 const mats = {
@@ -123,8 +128,8 @@ function addCylinder(x, y, z, radius, height, material, segments = 24) {
   return mesh;
 }
 function addRing(x, z, radius, material) {
-  const mesh = new GFX.Mesh(new GFX.RingGeometry(radius - 0.12, radius, 48), material);
-  mesh.rotation.x = -Math.PI / 2;
+  const mesh = new GFX.Mesh(new GFX.TorusGeometry(radius - 0.06, 0.06, 8, 48), material);
+  mesh.rotation.x = Math.PI / 2;
   mesh.position.set(x, 0.025, z);
   scene.add(mesh);
   return mesh;
@@ -138,7 +143,7 @@ floor.receiveShadow = true;
 scene.add(floor);
 const platforms = [
   { x: -9, z: 5, w: 6, d: 6, h: 2.0 },
-  { x: -1, z: -3, w: 6, d: 6, h: 3.0 },
+  { x: -1, z: -3, w: 6, d: 6, h: 2.15 },
   { x: 8, z: 3, w: 7, d: 7, h: 1.55 },
   { x: -10, z: -9, w: 7, d: 7, h: 1.25 },
   { x: 2, z: 11, w: 8, d: 4, h: 1.8 },
@@ -149,20 +154,37 @@ for (const p of platforms) {
   addBox(p.x, p.h + 0.045, p.z, p.w + 0.08, 0.09, p.d + 0.08, mats.dark, false);
   addBox(p.x, p.h + 0.1, p.z - p.d / 2 + 0.08, p.w - 0.2, 0.045, 0.07, mats.trim, false);
 }
+function insideFootprint(x, z, object) {
+  return Math.abs(x - object.x) <= object.w / 2 && Math.abs(z - object.z) <= object.d / 2;
+}
+const buildingSolids = [];
 function surfaceAt(x, z) {
   let height = 0;
   for (const p of platforms) {
-    if (Math.abs(x - p.x) <= p.w / 2 && Math.abs(z - p.z) <= p.d / 2) height = Math.max(height, p.h + 0.09);
+    if (insideFootprint(x, z, p)) height = Math.max(height, p.h + 0.09);
   }
   return height;
 }
+// Raised platforms and office blocks are solid from their bases to their tops.
+// Axis-separated resolution lets the player slide along their edges.
+function canMoveTo(x, z, feetY) {
+  for (const p of platforms) {
+    if (insideFootprint(x, z, p) && feetY < p.h + 0.09 - 0.18) return false;
+  }
+  for (const b of buildingSolids) {
+    if (insideFootprint(x, z, b) && feetY < b.h - 0.12) return false;
+  }
+  return true;
+}
 
 // Distant office blocks and a towering glass data center.
-for (const [x, z, w, d, h] of [
+const skylineBuildings = [
   [-20, -15, 5, 7, 9], [-19, 1, 6, 6, 7], [-20, 17, 7, 6, 11],
   [20, 16, 5, 7, 10], [20, -1, 6, 6, 8], [3, -21, 7, 4, 7],
   [-7, 21, 8, 4, 6], [19, -20, 5, 5, 12],
-]) {
+];
+for (const [x, z, w, d, h] of skylineBuildings) {
+  buildingSolids.push({ x, z, w, d, h });
   addBox(x, h / 2, z, w, h, d, mats.dark);
   for (let y = 1.5; y < h - 0.5; y += 1.6) {
     for (let col = -1; col <= 1; col++) {
@@ -170,6 +192,7 @@ for (const [x, z, w, d, h] of [
     }
   }
 }
+buildingSolids.push({ x: DATA_CENTER.x, z: DATA_CENTER.z, w: 6.8, d: 6.8, h: 8.4 });
 addBox(DATA_CENTER.x, 4.2, DATA_CENTER.z, 6.8, 8.4, 6.8, mats.dark);
 addBox(DATA_CENTER.x, 8.5, DATA_CENTER.z, 7.1, 0.22, 7.1, mats.trim);
 for (let y = 1.2; y < 8; y += 1.45) {
@@ -268,8 +291,10 @@ function attack() {
     const dot = distance > 0.001 ? (dx * fx + dz * fz) / distance : 1;
     if (distance < 2.45 && dot > -0.2 && Math.abs(surfaceAt(enemy.x, enemy.z) - player.y) < 2.0) {
       enemy.hp -= 1;
-      enemy.x += fx * 0.48;
-      enemy.z += fz * 0.48;
+      const pushedX = enemy.x + fx * 0.48;
+      const pushedZ = enemy.z + fz * 0.48;
+      if (canMoveTo(pushedX, enemy.z, surfaceAt(enemy.x, enemy.z))) enemy.x = pushedX;
+      if (canMoveTo(enemy.x, pushedZ, surfaceAt(enemy.x, enemy.z))) enemy.z = pushedZ;
       enemy.stun = 0.5;
       hits++;
       if (enemy.hp <= 0) {
@@ -311,6 +336,7 @@ function respawnPlayer() {
 stage.run((rawDt) => {
   const dt = Math.min(rawDt, 0.05);
   elapsed += dt;
+  input.take(); // Drain unused tap presses so input state stays bounded.
   input.take(); // discard pointer-tap/gamepad presses not used by this game
   if (toastTimer > 0) {
     toastTimer -= dt;
@@ -334,9 +360,10 @@ stage.run((rawDt) => {
   const sprint = keys.has('ShiftLeft') || keys.has('ShiftRight');
   const speed = sprint ? 8.6 : 5.8;
   if (magnitude > 0.08) {
-    // toGround preserves the stick's length; apply the speed only once.
-    player.x += mx * speed * dt;
-    player.z += mz * speed * dt;
+    const nextX = player.x + mx * speed * dt;
+    const nextZ = player.z + mz * speed * dt;
+    if (canMoveTo(nextX, player.z, player.y)) player.x = nextX;
+    if (canMoveTo(player.x, nextZ, player.y)) player.z = nextZ;
     player.yaw = Math.atan2(mx, mz);
   }
   player.x = Math.max(-21.5, Math.min(21.5, player.x));
@@ -344,7 +371,7 @@ stage.run((rawDt) => {
 
   const previousY = player.y;
   if (player.grounded && jumpQueued) {
-    player.vy = 9.2;
+    player.vy = 11.0;
     player.grounded = false;
     tone(340, 0.08, 0.06);
   }
@@ -370,7 +397,7 @@ stage.run((rawDt) => {
   sam.group.position.set(player.x, player.y, player.z);
   sam.group.rotation.y = player.yaw;
   sam.group.rotation.z = player.invulnerable > 0 ? Math.sin(elapsed * 28) * 0.08 : 0;
-  sam.pose({ clip: magnitude > 0.1 ? 'walk' : 'idle', t: elapsed, time: elapsed });
+  sam.pose({ clip: swingTime > 0 ? 'attack' : (magnitude > 0.1 ? 'walk' : 'idle'), t: swingTime > 0 ? 0.22 - swingTime : elapsed, time: elapsed });
 
   for (const item of ramItems) {
     if (!item.active) continue;
@@ -414,8 +441,11 @@ stage.run((rawDt) => {
         if (td > 0.1) { vx = txd / td; vz = tzd / td; }
       }
       const eSpeed = distance < 8.5 ? 2.6 : 1.25;
-      enemy.x += vx * eSpeed * dt;
-      enemy.z += vz * eSpeed * dt;
+      const nextX = enemy.x + vx * eSpeed * dt;
+      const nextZ = enemy.z + vz * eSpeed * dt;
+      const enemyY = surfaceAt(enemy.x, enemy.z);
+      if (canMoveTo(nextX, enemy.z, enemyY)) enemy.x = nextX;
+      if (canMoveTo(enemy.x, nextZ, enemyY)) enemy.z = nextZ;
     }
     enemy.x = Math.max(-21, Math.min(21, enemy.x));
     enemy.z = Math.max(-21, Math.min(21, enemy.z));
