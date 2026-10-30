@@ -37,6 +37,7 @@ const stage = await createStage(host, {
 });
 const { scene } = stage;
 const streetLampFixtures = stage.fixtureLights;
+const streetlampDefinition = { ...engineStreetlamp, bones: [] };
 let streetLampLightIndex = 0;
 const input = createInput(host, {
   // Pointer movement is measured from Sam's projected screen position.
@@ -121,58 +122,90 @@ document.querySelector('#start-button').addEventListener('click', () => {
   wakeAudio();
 });
 document.querySelector('#attack-button').addEventListener('pointerdown', (event) => {
-  event.preventDefault();attackQueued=true;
-  const nearby=townsfolk.filter(person=>person.hp>0)
-   .sort((a,b)=>Math.hypot(a.x-player.x,a.z-player.z)-Math.hypot(b.x-player.x,b.z-player.z))[0];
-  if(nearby)player.yaw=Math.atan2(nearby.x-player.x,nearby.z-player.z);
-  wakeAudio();
-});
-document.querySelector('#jump-button').addEventListener('pointerdown', (event) => {
   event.preventDefault();
-  jumpQueued = true;
-  wakeAudio();
-});
-document.querySelector('#raid-button').addEventListener('pointerdown', (event) => {
-  event.preventDefault(); raidQueued = true; wakeAudio();
-});
-document.querySelector('#play-again').addEventListener('click', () => location.reload());
-
-function handlePrimaryClick(){
- if(!started||won)return;
- if(nearestProperty()){
-  raidQueued=true;
- }else{
-  let target=null,best=3.3;
+  if(!started||won)return;
+  let nearby=null,best=2.45;
   for(const person of townsfolk){
    if(person.hp<=0)continue;
    const distance=Math.hypot(person.x-player.x,person.z-player.z);
-   if(distance<best){best=distance;target=person;}
+   if(distance<best){best=distance;nearby=person;}
   }
-  if(target)player.yaw=Math.atan2(target.x-player.x,target.z-player.z);
+  if(!nearby){showToast('NO ONE IN MELEE RANGE');return;}
+  player.yaw=Math.atan2(nearby.x-player.x,nearby.z-player.z);
+  attackQueued=true;wakeAudio();
+});
+document.querySelector('#jump-button').addEventListener('pointerdown', (event) => {
+  event.preventDefault();
+  if(!started||won)return;
+  jumpQueued = true;wakeAudio();
+});
+document.querySelector('#raid-button').addEventListener('pointerdown', (event) => {
+  event.preventDefault();
+  if(!started||won)return;
+  raidQueued=true;wakeAudio();
+});
+document.querySelector('#play-again').addEventListener('click', () => location.reload());
+
+function projectedDistance(worldX,worldY,worldZ,screenX,screenY){
+ const projected=new GFX.Vector3(worldX,worldY,worldZ).project(stage.camera);
+ if(!Number.isFinite(projected.x)||!Number.isFinite(projected.y)||projected.z< -1||projected.z>1)return Infinity;
+ const rect=host.getBoundingClientRect();
+ const x=rect.left+(projected.x+1)*0.5*rect.width;
+ const y=rect.top+(1-projected.y)*0.5*rect.height;
+ return Math.hypot(x-screenX,y-screenY);
+}
+function handlePrimaryClick(screenX,screenY){
+ if(!started||won)return;
+ let selected=null,best=Infinity;
+ for(const property of properties){
+  if(property.raided||!activeProperty(property))continue;
+  const worldDistance=Math.hypot(player.x-property.doorX,player.z-property.doorZ);
+  if(worldDistance>3.35)continue;
+  const screenDistance=projectedDistance(property.doorX,0.95,property.doorZ,screenX,screenY);
+  if(screenDistance<62&&screenDistance<best){selected={kind:'raid',property};best=screenDistance;}
+ }
+ for(const person of townsfolk){
+  if(person.hp<=0)continue;
+  const worldDistance=Math.hypot(player.x-person.x,player.z-person.z);
+  if(worldDistance>2.45)continue;
+  const screenDistance=projectedDistance(person.x,0.95,person.z,screenX,screenY);
+  if(screenDistance<48&&screenDistance<best){selected={kind:'attack',person};best=screenDistance;}
+ }
+ if(!selected){showToast('GET CLOSER — CLICK A FRONT DOOR OR TOWNSPERSON');return;}
+ if(selected.kind==='raid')raidQueued=true;
+ else{
+  player.yaw=Math.atan2(selected.person.x-player.x,selected.person.z-player.z);
   attackQueued=true;
  }
  wakeAudio();
 }
 host.addEventListener('pointerdown',(event)=>{
  if(event.pointerType!=='mouse'||event.button!==0)return;
+ event.preventDefault();
+ event.stopImmediatePropagation();
  primaryPointer={id:event.pointerId,x:event.clientX,y:event.clientY,
   startedAt:performance.now(),dragged:false};
-});
+ host.setPointerCapture?.(event.pointerId);
+},{capture:true});
 host.addEventListener('pointermove',(event)=>{
  if(!primaryPointer||primaryPointer.id!==event.pointerId)return;
+ event.stopImmediatePropagation();
  if(Math.hypot(event.clientX-primaryPointer.x,event.clientY-primaryPointer.y)>9)primaryPointer.dragged=true;
-});
+},{capture:true});
 host.addEventListener('pointerup',(event)=>{
  if(!primaryPointer||primaryPointer.id!==event.pointerId)return;
+ event.preventDefault();
+ event.stopImmediatePropagation();
  const clicked=!primaryPointer.dragged&&performance.now()-primaryPointer.startedAt<650
   &&Math.hypot(event.clientX-primaryPointer.x,event.clientY-primaryPointer.y)<9;
  primaryPointer=null;
- if(clicked)handlePrimaryClick();
-});
+ if(clicked)handlePrimaryClick(event.clientX,event.clientY);
+},{capture:true});
 host.addEventListener('pointercancel',(event)=>{
- if(primaryPointer&&primaryPointer.id===event.pointerId)primaryPointer=null;
-});
-
+ if(primaryPointer&&primaryPointer.id===event.pointerId){
+  event.stopImmediatePropagation();primaryPointer=null;
+ }
+},{capture:true});
 
 const mats = {
   ground: new GFX.MeshStandardMaterial({ color: '#263b3a', roughness: 0.94 }),
@@ -243,7 +276,7 @@ function addSurface(w,d,x,z,material,y=0.02) {
 }
 function addLamp(x,z,yaw=0) {
   // The pole, arm and sodium cobra-head are the engine's sculpted streetlamp.
-  const mesh = createStatic(GFX, engineStreetlamp);
+  const mesh = createStatic(GFX, streetlampDefinition);
   mesh.position.set(x,0,z);
   mesh.rotation.y = yaw;
   scene.add(mesh);
@@ -353,7 +386,7 @@ const lotXs=[-24,-16,-8,8,16,24];let propertyIndex=0;
 for(const row of rows)row.entries.forEach(([type,label,loot],i)=>{
   const x=lotXs[i],z=row.z,yaw=row.yaw;
   cityBatch.stamp(buildingLibrary.modelFor(type,{level:type==='aptblock'?3:2,variant:propertyIndex%8}).parts,x,0,z,yaw,BUILDING_SCALE);
-  const fp=FOOTPRINTS[type]??[2,2],halfW=fp[0]*0.45*BUILDING_SCALE,halfD=fp[1]*0.42*BUILDING_SCALE;
+  const fp=FOOTPRINTS[type]??[2,2],halfW=fp[0]*0.5*BUILDING_SCALE,halfD=fp[1]*0.5*BUILDING_SCALE;
   const front=fp[1]*0.38*BUILDING_SCALE+0.78,fx=Math.sin(yaw),fz=Math.cos(yaw);
   properties.push({id:propertyIndex++,type,label,kind:row.kind,baseLoot:loot,loot,x,z,yaw,halfW,halfD,
     doorX:x+fx*front,doorZ:z+fz*front,raided:false});
@@ -627,10 +660,14 @@ function raidProperty(){
  if(stash<=0){showToast('ALL LEVEL RAM FOUND — RETURN TO THE VAN');return;}
  property.raided=true;player.raids++;player.score+=stash*45;player.levelLootReleased+=stash;
  const sideX=Math.cos(property.yaw),sideZ=-Math.sin(property.yaw);
+ const facingX=Math.sin(property.yaw),facingZ=Math.cos(property.yaw);
  for(let i=0;i<stash;i++){
-  const lane=(i%3)-1,row=Math.floor(i/3);
-  spawnRam(property.doorX+sideX*lane*0.56+Math.sin(row*1.9)*0.16,
-   property.doorZ+sideZ*lane*0.56+(row%2)*0.38,1);
+  const lane=(i%3)-1,row=Math.floor(i/3),outward=(row%2)*0.42;
+  spawnRam(
+   property.doorX+sideX*lane*0.56+facingX*outward,
+   property.doorZ+sideZ*lane*0.56+facingZ*outward,
+   1
+  );
  }
  effects.ring(property.doorX,0,property.doorZ,{colour:'#a6ff52',reach:2.8,life:0.55});
  sparkBurst(property.doorX,0.6,property.doorZ,22);alertTownfolk(property);
@@ -726,7 +763,11 @@ function deliverRam(){
 }
 function respawnPlayer(){
  const lost=Math.floor(player.ram/2);
- for(let i=0;i<lost;i++)spawnRam(player.x+Math.cos(i*2.4)*0.65,player.z+Math.sin(i*2.4)*0.65,1);
+ for(let i=0;i<lost;i++){
+  const angle=i*2.4,x=player.x+Math.cos(angle)*0.65,z=player.z+Math.sin(angle)*0.65;
+  const safe=nearestWalkableCell(x,z);
+  if(safe)spawnRam(safe.x,safe.z,1);
+ }
  player.ram-=lost;player.x=START.x;player.z=START.z;player.y=surfaceAt(START.x,START.z);
  player.vy=0;player.grounded=true;player.health=65;player.invulnerable=2;player.combo=0;
  jumpQueued=false;attackQueued=false;raidQueued=false;
