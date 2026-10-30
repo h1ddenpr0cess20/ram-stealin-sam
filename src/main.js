@@ -2,7 +2,8 @@ import * as GFX from 'madness-engine/gfx';
 import { createAudio } from 'madness-engine/audio';
 import { createInput } from 'madness-engine/input';
 import { createStage, LIGHTS, domeU } from 'madness-engine/stage';
-import { createModel } from 'madness-engine/models/model';
+import { createModel, createStatic } from 'madness-engine/models/model';
+import { streetlamp as engineStreetlamp } from 'madness-engine/scenery/street';
 import { toGround } from 'madness-engine/view';
 import robot from 'madness-engine/characters/robot';
 import punk from 'madness-engine/characters/punk';
@@ -29,11 +30,14 @@ const stage = await createStage(host, {
   lights: LIGHTS,
   shadows: true,
   shadowSize: 2048,
+  fixtures: 24,
   room: paintRoom(),
   ui: [document.querySelector('#overlay')],
   label: 'ram-stealin-sam',
 });
 const { scene } = stage;
+const streetLampFixtures = stage.fixtureLights;
+let streetLampLightIndex = 0;
 const input = createInput(host, {
   // Pointer movement is measured from Sam's projected screen position.
   anchor() {
@@ -237,12 +241,31 @@ function addSurface(w,d,x,z,material,y=0.02) {
   mesh.rotation.x = -Math.PI/2;
   mesh.position.set(x,y,z); mesh.receiveShadow = true; scene.add(mesh);
 }
-function addLamp(x,z) {
-  addCylinder(x,1.25,z,0.055,2.5,mats.dark,10);
-  addBox(x,2.48,z,0.44,0.08,0.16,mats.dark,false);
-  const globe = new GFX.Mesh(new GFX.SphereGeometry(0.13,12,8),
-    new GFX.MeshBasicMaterial({color:'#ffe3a4',toneMapped:false}));
-  globe.position.set(x+0.18,2.42,z); scene.add(globe);
+function addLamp(x,z,yaw=0) {
+  // The pole, arm and sodium cobra-head are the engine's sculpted streetlamp.
+  const mesh = createStatic(GFX, engineStreetlamp);
+  mesh.position.set(x,0,z);
+  mesh.rotation.y = yaw;
+  scene.add(mesh);
+
+  // Honour the light socket defined by the same engine asset. The stage owns
+  // a fixed pool of real point lights; no duplicate homemade lamp geometry.
+  const c = Math.cos(yaw), sn = Math.sin(yaw);
+  for (const [lx,ly,lz,colour,reach] of engineStreetlamp.lights || []) {
+    const light = streetLampFixtures[streetLampLightIndex++];
+    if (!light) continue;
+    light.position.set(
+      x + lx*c + lz*sn,
+      ly,
+      z - lx*sn + lz*c
+    );
+    light.color.set(colour);
+    light.intensity = 5.5;
+    light.distance = reach;
+    light.decay = 1.1;
+    light.castShadow = false;
+    light.visible = true;
+  }
 }
 function addRoadStripe(x,z,w,d,material=mats.roadWhite) {
   addBox(x,0.058,z,w,0.018,d,material,false);
@@ -267,7 +290,7 @@ for(const x of verticalRoads)for(const z of horizontalRoads){
     addBox(x+i*0.43,0.061,z-2.05,0.22,0.018,1,mats.roadWhite,false);
     addBox(x+i*0.43,0.061,z+2.05,0.22,0.018,1,mats.roadWhite,false);
   }
-  addLamp(x-4.3,z-4.2);addLamp(x+4.3,z+4.2);
+  addLamp(x-4.3,z-4.2,0);addLamp(x+4.3,z+4.2,Math.PI);
 }
 for(const z of [-21,-7,7,21])for(const x of [-24,-16,-8,8,16,24]){
   addSurface(5.6,5.3,x,z,townSurface('lawn',5.6,5.3,'#dbe5c7'),0.012);
