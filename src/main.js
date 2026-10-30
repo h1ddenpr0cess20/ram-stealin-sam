@@ -9,6 +9,9 @@ import punk from 'madness-engine/characters/punk';
 import critic from 'madness-engine/characters/critic';
 import { paintRoom } from 'madness-engine/textures/rooms/studio';
 import { paintSky } from 'madness-engine/textures/skies/haze';
+import { createBuildings } from 'madness-engine/buildings';
+import { Batch } from 'madness-engine/mesher';
+import { grass as paintGrass, concrete as paintConcrete } from 'madness-engine/textures/painters';
 import './style.css';
 
 // Temporary player cast: the engine's tin-can Robot Waiter. Replace this
@@ -137,6 +140,16 @@ function addRing(x, z, radius, material) {
 }
 
 // A broad city plaza with raised rooftops, server platforms and jump routes.
+const groundTexture = paintGrass(GFX);
+mats.ground.map = groundTexture.map;
+mats.ground.bumpMap = groundTexture.bump;
+mats.ground.bumpScale = 0.16;
+mats.ground.needsUpdate = true;
+const concreteTexture = paintConcrete(GFX);
+mats.concrete.map = concreteTexture.map;
+mats.concrete.bumpMap = concreteTexture.bump;
+mats.concrete.bumpScale = 0.11;
+mats.concrete.needsUpdate = true;
 const floor = new GFX.Mesh(new GFX.PlaneGeometry(48, 48), mats.ground);
 floor.rotation.x = -Math.PI / 2;
 floor.position.y = 0;
@@ -155,8 +168,40 @@ for (const p of platforms) {
   addBox(p.x, p.h + 0.045, p.z, p.w + 0.08, 0.09, p.d + 0.08, mats.dark, false);
   addBox(p.x, p.h + 0.1, p.z - p.d / 2 + 0.08, p.w - 0.2, 0.045, 0.07, mats.trim, false);
 }
+
 function insideFootprint(x, z, object) {
   return Math.abs(x - object.x) <= object.w / 2 && Math.abs(z - object.z) <= object.d / 2;
+}
+
+// Dress the plaza with the engine's authored procedural buildings. The batch
+// combines their material parts into a small number of draw calls.
+const buildingLibrary = createBuildings();
+const cityBatch = new Batch();
+const cityLots = [
+  { type: 'house', x: -17, z: -7, yaw: 0, w: 3.8, d: 3.8 },
+  { type: 'shop', x: -17, z: 7, yaw: Math.PI / 2, w: 3.8, d: 3.8 },
+  { type: 'workshop', x: 17, z: 12, yaw: Math.PI, w: 3.8, d: 3.8 },
+  { type: 'townhouse', x: -6, z: -17, yaw: 0, w: 3.8, d: 5.8 },
+  { type: 'cottage', x: 6, z: 18, yaw: Math.PI / 2, w: 3.8, d: 3.8 },
+  { type: 'market', x: -2, z: -13, yaw: 0, w: 5.8, d: 5.8 },
+];
+for (const [i, lot] of cityLots.entries()) {
+  cityBatch.stamp(buildingLibrary.modelFor(lot.type, { variant: i + 2 }).parts, lot.x, 0, lot.z, lot.yaw);
+  buildingSolids.push({ x: lot.x, z: lot.z, w: lot.w, d: lot.d, h: 3.8 });
+}
+for (const [materialName, accumulator] of cityBatch.accs) {
+  const geometry = accumulator.geometry(GFX);
+  if (!geometry) continue;
+  const material = new GFX.MeshStandardMaterial({
+    color: '#ffffff',
+    vertexColors: true,
+    roughness: materialName === 'glass' || materialName === 'metal' ? 0.48 : 0.9,
+    metalness: materialName === 'metal' ? 0.28 : 0.02,
+  });
+  const mesh = new GFX.Mesh(geometry, material);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
 }
 const buildingSolids = [];
 function surfaceAt(x, z) {
