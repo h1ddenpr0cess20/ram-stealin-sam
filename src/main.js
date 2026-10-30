@@ -21,7 +21,20 @@ const stage = await createStage(host, {
   label: 'ram-stealin-sam',
 });
 const { scene } = stage;
-const input = createInput(host);
+const input = createInput(host, {
+  // Pointer movement is measured from Sam's projected screen position.
+  anchor() {
+    const projected = new GFX.Vector3(player.x, player.y + 0.9, player.z).project(stage.camera);
+    const rect = host.getBoundingClientRect();
+    if (!Number.isFinite(projected.x) || !Number.isFinite(projected.y)) return null;
+    return {
+      x: rect.left + (projected.x + 1) * 0.5 * rect.width,
+      y: rect.top + (1 - projected.y) * 0.5 * rect.height,
+    };
+  },
+  // Keyboard actions are handled below; avoid the engine's default Space=start queue.
+  presses: {},
+});
 
 const ui = {
   ram: document.querySelector('#ram-count'),
@@ -41,7 +54,6 @@ let won = false;
 let toastTimer = 0;
 let attackQueued = false;
 let jumpQueued = false;
-let muted = false;
 
 const audio = createAudio({ storageKey: 'ram-stealin-sam.muted', glue: true });
 function wakeAudio() {
@@ -63,11 +75,10 @@ addEventListener('keydown', (event) => {
   if (event.repeat) return;
   keys.add(event.code);
   if (event.code === 'Space') jumpQueued = true;
-  if (event.code === 'KeyE' || event.code === 'KeyF') attackQueued = true;
+  if (event.code === 'KeyF') attackQueued = true;
   if (event.code === 'KeyM') {
-    audio.toggleMute();
-    muted = !muted;
-    showToast(muted ? 'AUDIO MUTED' : 'AUDIO ON');
+    const nowMuted = audio.toggleMute();
+    showToast(nowMuted ? 'AUDIO MUTED' : 'AUDIO ON');
   }
 });
 addEventListener('keyup', (event) => keys.delete(event.code));
@@ -122,7 +133,7 @@ function addRing(x, z, radius, material) {
 // A broad city plaza with raised rooftops, server platforms and jump routes.
 const floor = new GFX.Mesh(new GFX.PlaneGeometry(48, 48), mats.ground);
 floor.rotation.x = -Math.PI / 2;
-floor.position.y = -0.14;
+floor.position.y = 0;
 floor.receiveShadow = true;
 scene.add(floor);
 const platforms = [
@@ -175,7 +186,8 @@ addBox(DATA_CENTER.x, 0.28, DATA_CENTER.z + 5.4, 1.0, 0.48, 0.85, mats.dark);
 const sam = createModel(GFX, robot, { detail: 0.86 });
 scene.add(sam.group);
 sam.group.scale.setScalar(0.98);
-const player = { x: 0, z: 13, y: 0, vy: 0, yaw: Math.PI, health: 100, ram: 0, delivered: 0, invulnerable: 0, attackCooldown: 0, grounded: true };
+const START = { x: 0, z: 15 };
+const player = { x: START.x, z: START.z, y: surfaceAt(START.x, START.z), vy: 0, yaw: Math.PI, health: 100, ram: 0, delivered: 0, invulnerable: 0, attackCooldown: 0, grounded: true };
 sam.group.position.set(player.x, player.y, player.z);
 
 // Glowing RAM-stick pickups: two green DIMMs and a central contact strip.
@@ -229,9 +241,8 @@ for (let i = -2; i <= 2; i++) {
 
 let elapsed = 0;
 let swingTime = 0;
-let deliveredPulse = 0;
 stage.target.set(player.x, player.y + 1.2, player.z);
-stage.view.zoomBy(-1.0);
+stage.view.zoomBy(1.08);
 function updateHud() {
   ui.ram.textContent = String(player.ram).padStart(2, '0');
   ui.delivered.textContent = `${String(player.delivered).padStart(2, '0')} / ${TARGET_RAM}`;
@@ -263,6 +274,7 @@ function attack() {
       hits++;
       if (enemy.hp <= 0) {
         enemy.active = false;
+        enemy.model.group.visible = false;
         enemy.respawn = 8;
         for (let i = 0; i < 3; i++) spawnRam(enemy.x + (i - 1) * 0.4, enemy.z + 0.25, 1);
         showToast('OPPONENT RAIDED  +3 RAM');
@@ -279,7 +291,6 @@ function deliverRam() {
   const amount = player.ram;
   player.ram = 0;
   player.delivered += amount;
-  deliveredPulse = 0.8;
   showToast(`DELIVERED ${amount} RAM TO THE DATA CENTER`);
   tone(720, 0.22, 0.18);
   updateHud();
@@ -290,7 +301,7 @@ function deliverRam() {
   }
 }
 function respawnPlayer() {
-  player.x = 0; player.z = 13; player.y = surfaceAt(0, 13); player.vy = 0;
+  player.x = START.x; player.z = START.z; player.y = surfaceAt(START.x, START.z); player.vy = 0;
   player.health = Math.max(55, player.health);
   player.invulnerable = 2.0;
   showToast('EMERGENCY SHUTTLE — BACK TO THE PLAZA');
@@ -300,11 +311,11 @@ function respawnPlayer() {
 stage.run((rawDt) => {
   const dt = Math.min(rawDt, 0.05);
   elapsed += dt;
+  input.take(); // discard pointer-tap/gamepad presses not used by this game
   if (toastTimer > 0) {
     toastTimer -= dt;
     if (toastTimer <= 0) ui.toast.classList.remove('show');
   }
-  if (deliveredPulse > 0) deliveredPulse -= dt;
   if (!started || won) {
     const look = input.view(dt);
     stage.view.turn(look.turn, look.tilt);
@@ -323,8 +334,9 @@ stage.run((rawDt) => {
   const sprint = keys.has('ShiftLeft') || keys.has('ShiftRight');
   const speed = sprint ? 8.6 : 5.8;
   if (magnitude > 0.08) {
-    player.x += mx / Math.max(1, Math.hypot(mx, mz)) * speed * magnitude * dt;
-    player.z += mz / Math.max(1, Math.hypot(mx, mz)) * speed * magnitude * dt;
+    // toGround preserves the stick's length; apply the speed only once.
+    player.x += mx * speed * dt;
+    player.z += mz * speed * dt;
     player.yaw = Math.atan2(mx, mz);
   }
   player.x = Math.max(-21.5, Math.min(21.5, player.x));
@@ -358,7 +370,7 @@ stage.run((rawDt) => {
   sam.group.position.set(player.x, player.y, player.z);
   sam.group.rotation.y = player.yaw;
   sam.group.rotation.z = player.invulnerable > 0 ? Math.sin(elapsed * 28) * 0.08 : 0;
-  sam.pose({ clip: 'walk', t: elapsed, time: elapsed });
+  sam.pose({ clip: magnitude > 0.1 ? 'walk' : 'idle', t: elapsed, time: elapsed });
 
   for (const item of ramItems) {
     if (!item.active) continue;
@@ -380,6 +392,7 @@ stage.run((rawDt) => {
       enemy.respawn -= dt;
       if (enemy.respawn <= 0) {
         enemy.active = true;
+        enemy.model.group.visible = true;
         enemy.hp = 2;
         enemy.x = enemy.homeX;
         enemy.z = enemy.homeZ;
@@ -413,8 +426,9 @@ stage.run((rawDt) => {
       enemy.attackTimer = 1.0;
       player.health = Math.max(0, player.health - 12);
       player.invulnerable = 0.72;
-      player.x += dx / Math.max(0.01, distance) * 0.65;
-      player.z += dz / Math.max(0.01, distance) * 0.65;
+      // Knock Sam away from the attacker, not toward it.
+      player.x -= dx / Math.max(0.01, distance) * 0.65;
+      player.z -= dz / Math.max(0.01, distance) * 0.65;
       showToast('YOU GOT BONKED — WATCH YOUR RAM');
       tone(115, 0.18, 0.18);
       updateHud();
@@ -422,7 +436,7 @@ stage.run((rawDt) => {
     }
   }
 
-  if (Math.hypot(player.x - DATA_CENTER.x, player.z - (DATA_CENTER.z + 5.4)) < 3.0 && player.y < 1.3) deliverRam();
+  if (player.grounded && Math.hypot(player.x - DATA_CENTER.x, player.z - (DATA_CENTER.z + 5.4)) < 3.0 && player.y < 0.6) deliverRam();
 
   const k = 1 - Math.exp(-5.2 * dt);
   stage.target.x += (player.x - stage.target.x) * k;
