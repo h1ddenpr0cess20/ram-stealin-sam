@@ -208,7 +208,7 @@ function insideFootprint(x, z, object, margin = 0) {
 function surfaceAt(x, z) {
   let height = 0.12; // Continuous asphalt catch floor.
   for (const p of platforms) {
-    if (insideFootprint(x, z, p)) height = Math.max(height, p.h + 0.08);
+    if (insideFootprint(x, z, p)) height = Math.max(height, p.h + 0.012);
   }
   return height;
 }
