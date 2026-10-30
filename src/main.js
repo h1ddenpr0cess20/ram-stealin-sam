@@ -185,11 +185,11 @@ for (const p of platforms) {
   addBox(p.x, p.h / 2, p.z, p.w, p.h, p.d, mats.dark, false);
   const top = new GFX.Mesh(new GFX.PlaneGeometry(p.w - 0.12, p.d - 0.12), finishes[p.finish]);
   top.rotation.x = -Math.PI / 2;
-  top.position.set(p.x, p.h + 0.012, p.z);
+  top.position.set(p.x, p.h + 0.09, p.z);
   top.receiveShadow = true;
   scene.add(top);
   // Four thin edge rails clarify the platform silhouette without adding buildings.
-  const edgeY = p.h + 0.035;
+  const edgeY = p.h + 0.11;
   addBox(p.x, edgeY, p.z - p.d / 2 + 0.045, p.w - 0.12, 0.055, 0.07, mats.trim, false);
   addBox(p.x, edgeY, p.z + p.d / 2 - 0.045, p.w - 0.12, 0.055, 0.07, mats.trim, false);
   addBox(p.x - p.w / 2 + 0.045, edgeY, p.z, 0.07, 0.055, p.d - 0.12, mats.trim, false);
