@@ -175,6 +175,7 @@ function insideFootprint(x, z, object) {
 
 // Dress the plaza with the engine's authored procedural buildings. The batch
 // combines their material parts into a small number of draw calls.
+const buildingSolids = [];
 const buildingLibrary = createBuildings();
 const cityBatch = new Batch();
 const cityLots = [
@@ -203,7 +204,6 @@ for (const [materialName, accumulator] of cityBatch.accs) {
   mesh.receiveShadow = true;
   scene.add(mesh);
 }
-const buildingSolids = [];
 function surfaceAt(x, z) {
   let height = 0;
   for (const p of platforms) {
