@@ -219,7 +219,7 @@ const enemies = enemySpots.map(([x, z], i) => {
 });
 
 // Neon service markers and low bollards give the plaza a readable scale.
-for ( (const [x, z] of [[-16, -3], [-2, 18], [16, 12], [15, -16], [-16, -16]]) {
+for (const [x, z] of [[-16, -3], [-2, 18], [16, 12], [15, -16], [-16, -16]]) {
   addCylinder(x, 0.58, z, 0.16, 1.16, mats.warning, 12);
   addCylinder(x, 1.18, z, 0.25, 0.12, mats.trim, 12);
 }
@@ -358,7 +358,7 @@ stage.run((rawDt) => {
   sam.group.position.set(player.x, player.y, player.z);
   sam.group.rotation.y = player.yaw;
   sam.group.rotation.z = player.invulnerable > 0 ? Math.sin(elapsed * 28) * 0.08 : 0;
-  sam.pose({ clip: magnitude > 0.1 ? 'walk' : 'idle', t: elapsed, time: elapsed });
+  sam.pose({ clip: 'walk', t: elapsed, time: elapsed });
 
   for (const item of ramItems) {
     if (!item.active) continue;
