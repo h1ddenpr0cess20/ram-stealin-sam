@@ -4,15 +4,15 @@ import { createInput } from 'madness-engine/input';
 import { createStage } from 'madness-engine/stage';
 import { createModel } from 'madness-engine/models/model';
 import { toGround } from 'madness-engine/view';
-import agent from 'madness-engine/characters/agent';
+import robot from 'madness-engine/characters/robot';
 import punk from 'madness-engine/characters/punk';
 import critic from 'madness-engine/characters/critic';
 import { paintRoom } from 'madness-engine/textures/rooms/studio';
 import { paintSky } from 'madness-engine/textures/skies/haze';
 import './style.css';
 
-// The Agent is a temporary cast choice for Sam. Swap this import when the
-// final Sam sculpt is ready; movement, combat and progression are independent.
+// Temporary player cast: the engine's tin-can Robot Waiter. Replace this
+// import when the final Sam sculpt is ready; gameplay is decoupled from the cast.
 const host = document.querySelector('#game');
 const stage = await createStage(host, {
   sky: paintSky(),
@@ -172,7 +172,7 @@ addRing(DATA_CENTER.x, DATA_CENTER.z + 5.4, 2.8, mats.trim);
 addBox(DATA_CENTER.x, 0.28, DATA_CENTER.z + 5.4, 1.0, 0.48, 0.85, mats.dark);
 
 // The player's model is deliberately replaceable: this cast member is a stand-in.
-const sam = createModel(GFX, agent, { detail: 0.86 });
+const sam = createModel(GFX, robot, { detail: 0.86 });
 scene.add(sam.group);
 sam.group.scale.setScalar(0.98);
 const player = { x: 0, z: 13, y: 0, vy: 0, yaw: Math.PI, health: 100, ram: 0, delivered: 0, invulnerable: 0, attackCooldown: 0, grounded: true };
