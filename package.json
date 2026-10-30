@@ -1,0 +1,17 @@
+{
+  "name": "ram-stealin-sam",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "madness-engine": "github:h1ddenpr0cess20/madness-engine#main"
+  },
+  "devDependencies": {
+    "vite": "^7.1.0"
+  }
+}
