@@ -19,7 +19,6 @@ npm run dev
 - Mobile: on-screen jump and RAM raid buttons
 - Shift: sprint
 - M: mute audio
-- Mouse drag on the arena: move toward the pointer
 
 Collect RAM sticks around the plaza and from knocked-out opponents. Carry it to the glowing delivery pad at the data center. The target is 20 RAM delivered.
 

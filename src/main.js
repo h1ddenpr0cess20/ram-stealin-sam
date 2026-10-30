@@ -130,7 +130,7 @@ function addCylinder(x, y, z, radius, height, material, segments = 24) {
 }
 function addRing(x, z, radius, material) {
   const mesh = new GFX.Mesh(new GFX.TorusGeometry(radius - 0.06, 0.06, 8, 48), material);
-  mesh.rotation.x = Math.PI / 2;
+  mesh.rotation.x = -Math.PI / 2;
   mesh.position.set(x, 0.025, z);
   scene.add(mesh);
   return mesh;
@@ -330,9 +330,15 @@ function deliverRam() {
   }
 }
 function respawnPlayer() {
-  player.x = START.x; player.z = START.z; player.y = surfaceAt(START.x, START.z); player.vy = 0;
+  player.x = START.x;
+  player.z = START.z;
+  player.y = surfaceAt(START.x, START.z);
+  player.vy = 0;
+  player.grounded = true;
   player.health = Math.max(55, player.health);
   player.invulnerable = 2.0;
+  jumpQueued = false;
+  attackQueued = false;
   showToast('EMERGENCY SHUTTLE — BACK TO THE PLAZA');
   updateHud();
 }
@@ -459,9 +465,11 @@ stage.run((rawDt) => {
       enemy.attackTimer = 1.0;
       player.health = Math.max(0, player.health - 12);
       player.invulnerable = 0.72;
-      // Knock Sam away from the attacker, not toward it.
-      player.x -= dx / Math.max(0.01, distance) * 0.65;
-      player.z -= dz / Math.max(0.01, distance) * 0.65;
+      // dx/distance points from the attacker to Sam, so adding it repels him.
+      const repelX = player.x + dx / Math.max(0.01, distance) * 0.65;
+      const repelZ = player.z + dz / Math.max(0.01, distance) * 0.65;
+      if (canMoveTo(repelX, player.z, player.y)) player.x = repelX;
+      if (canMoveTo(player.x, repelZ, player.y)) player.z = repelZ;
       showToast('YOU GOT BONKED — WATCH YOUR RAM');
       tone(115, 0.18, 0.18);
       updateHud();
