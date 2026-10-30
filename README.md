@@ -1,0 +1,22 @@
+# RAM STEALIN' SAM
+
+A 3D platform-action prototype built on [madness-engine](https://github.com/h1ddenpr0cess20/madness-engine).
+
+## Run locally
+
+```sh
+npm install
+npm run dev
+```
+
+## Controls
+
+- WASD / arrow keys: move
+- Mouse drag: orbit camera
+- Space: RAM raid (close-range attack)
+- Shift: sprint
+- M: mute audio
+
+Collect RAM sticks, raid rival tech workers for their RAM, and deliver enough hardware to the data center.
+
+The player currently uses the engine's `agent` cast member as a placeholder.
