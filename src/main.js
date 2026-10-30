@@ -30,15 +30,16 @@ const stage = await createStage(host, {
   lights: LIGHTS,
   shadows: true,
   shadowSize: 2048,
-  fixtures: 24,
+  fixtures: 8,
   room: paintRoom(),
   ui: [document.querySelector('#overlay')],
   label: 'ram-stealin-sam',
 });
 const { scene } = stage;
 const streetLampFixtures = stage.fixtureLights;
+const streetLampSockets = [];
+let streetLightingRefresh = 0;
 const streetlampDefinition = { ...engineStreetlamp, bones: [] };
-let streetLampLightIndex = 0;
 const input = createInput(host, {
   // Pointer movement is measured from Sam's projected screen position.
   anchor() {
@@ -281,23 +282,38 @@ function addLamp(x,z,yaw=0) {
   mesh.rotation.y = yaw;
   scene.add(mesh);
 
-  // Honour the light socket defined by the same engine asset. The stage owns
-  // a fixed pool of real point lights; no duplicate homemade lamp geometry.
+  // Store the engine asset's real light sockets. The renderer supports
+  // eight point lights, so the stage reuses that pool for nearby lamps.
   const c = Math.cos(yaw), sn = Math.sin(yaw);
   for (const [lx,ly,lz,colour,reach] of engineStreetlamp.lights || []) {
-    const light = streetLampFixtures[streetLampLightIndex++];
-    if (!light) continue;
-    light.position.set(
-      x + lx*c + lz*sn,
-      ly,
-      z - lx*sn + lz*c
-    );
-    light.color.set(colour);
-    light.intensity = 5.5;
-    light.distance = reach;
-    light.decay = 1.1;
-    light.castShadow = false;
-    light.visible = true;
+    streetLampSockets.push({
+      x:x + lx*c + lz*sn,
+      y:ly,
+      z:z - lx*sn + lz*c,
+      colour,
+      reach,
+    });
+  }
+}
+function updateStreetLighting(dt) {
+  streetLightingRefresh -= dt;
+  if (streetLightingRefresh > 0) return;
+  streetLightingRefresh = 0.22;
+  const nearest = streetLampSockets
+    .map(socket => ({socket, distance:(socket.x-player.x)**2+(socket.z-player.z)**2}))
+    .sort((a,b) => a.distance-b.distance)
+    .slice(0,streetLampFixtures.length);
+  for (let i=0;i<streetLampFixtures.length;i++) {
+    const light=streetLampFixtures[i], entry=nearest[i];
+    if (!entry) { light.intensity=0; light.visible=false; continue; }
+    const socket=entry.socket;
+    light.position.set(socket.x,socket.y,socket.z);
+    light.color.set(socket.colour);
+    light.intensity=5.5;
+    light.distance=socket.reach;
+    light.decay=1.1;
+    light.castShadow=false;
+    light.visible=true;
   }
 }
 function addRoadStripe(x,z,w,d,material=mats.roadWhite) {
@@ -777,6 +793,7 @@ function respawnPlayer(){
 
 stage.run((rawDt)=>{
  const dt=Math.min(rawDt,0.05);elapsed+=dt;input.take();
+ updateStreetLighting(dt);
  if(toastTimer>0){toastTimer-=dt;if(toastTimer<=0)ui.toast.classList.remove('show');}
  if(!started||won){
   effects.update(dt);const look=input.view(dt);
