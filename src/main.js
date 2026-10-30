@@ -137,8 +137,8 @@ function addRing(x, z, radius, material) {
   return mesh;
 }
 
-// Rebuilt as a platform-only industrial parkour arena. The routes form a
-// readable loop around a central hub; every landing is a playable surface.
+// Continuous ground-level industrial campus. All visible zones are flush
+// material overlays on one uninterrupted floor; no gaps or floating landings.
 const asphaltTexture = paintAsphalt(GFX);
 const concreteTexture = paintConcrete(GFX);
 const plateTexture = paintPlate(GFX);
@@ -147,73 +147,53 @@ const surfaceMaterial = (paint, tint, roughness, metalness, repeat = 1) => new G
   color: tint,
   map: tiled(GFX, paint.map, repeat, repeat),
   bumpMap: tiled(GFX, paint.bump, repeat, repeat),
-  bumpScale: 0.075,
+  bumpScale: 0.055,
   roughness,
   metalness,
 });
-mats.ground = surfaceMaterial(asphaltTexture, '#778287', 0.94, 0.04, 8);
+mats.ground = surfaceMaterial(asphaltTexture, '#899397', 0.95, 0.02, 10);
 const floor = new GFX.Mesh(new GFX.PlaneGeometry(48, 48), mats.ground);
 floor.rotation.x = -Math.PI / 2;
 floor.position.y = 0;
 floor.receiveShadow = true;
 scene.add(floor);
 
-const platforms = [
-  // Central transfer hub and four raised approach lanes.
-  { x: 0, z: 0, w: 10, d: 9, h: 1.15, finish: 'concrete' },
-  { x: -7, z: 0, w: 4, d: 3.2, h: 1.2, finish: 'grate' },
-  { x: 7, z: 0, w: 4, d: 3.2, h: 1.2, finish: 'grate' },
-  { x: 0, z: -6.5, w: 3.2, d: 4, h: 1.25, finish: 'plate' },
-  { x: 0, z: 6.5, w: 3.2, d: 4, h: 1.25, finish: 'plate' },
-  // Four distinct outer decks create a continuous circuit with varied jumps.
-  { x: -12, z: 0, w: 6, d: 7, h: 1.55, finish: 'plate' },
-  { x: 12, z: 0, w: 6, d: 7, h: 1.5, finish: 'concrete' },
-  { x: 0, z: -12, w: 8, d: 6, h: 1.8, finish: 'grate' },
-  { x: 0, z: 12, w: 8, d: 6, h: 1.45, finish: 'plate' },
-  // Corner stepping decks are optional high-risk shortcuts.
-  { x: -12, z: -12, w: 5.5, d: 5.5, h: 2.05, finish: 'grate' },
-  { x: 12, z: -12, w: 5.5, d: 5.5, h: 1.95, finish: 'plate' },
-  { x: -12, z: 12, w: 5.5, d: 5.5, h: 1.85, finish: 'concrete' },
-  { x: 12, z: 12, w: 5.5, d: 5.5, h: 2.1, finish: 'grate' },
+const zoneMaterials = [
+  surfaceMaterial(concreteTexture, '#a0a9aa', 0.92, 0.02, 3),
+  surfaceMaterial(plateTexture, '#9aa6aa', 0.48, 0.58, 3),
+  surfaceMaterial(grateTexture, '#7d8c91', 0.68, 0.4, 3),
 ];
-const finishes = {
-  concrete: surfaceMaterial(concreteTexture, '#a0a9aa', 0.9, 0.02, 2),
-  plate: surfaceMaterial(plateTexture, '#9aa6aa', 0.48, 0.62, 2),
-  grate: surfaceMaterial(grateTexture, '#7d8c91', 0.66, 0.42, 2),
-};
-for (const p of platforms) {
-  addBox(p.x, p.h / 2, p.z, p.w, p.h, p.d, mats.dark, false);
-  const top = new GFX.Mesh(new GFX.PlaneGeometry(p.w - 0.12, p.d - 0.12), finishes[p.finish]);
-  top.rotation.x = -Math.PI / 2;
-  top.position.set(p.x, p.h + 0.09, p.z);
-  top.receiveShadow = true;
-  scene.add(top);
-  // Four thin edge rails clarify the platform silhouette without adding buildings.
-  const edgeY = p.h + 0.11;
-  addBox(p.x, edgeY, p.z - p.d / 2 + 0.045, p.w - 0.12, 0.055, 0.07, mats.trim, false);
-  addBox(p.x, edgeY, p.z + p.d / 2 - 0.045, p.w - 0.12, 0.055, 0.07, mats.trim, false);
-  addBox(p.x - p.w / 2 + 0.045, edgeY, p.z, 0.07, 0.055, p.d - 0.12, mats.trim, false);
-  addBox(p.x + p.w / 2 - 0.045, edgeY, p.z, 0.07, 0.055, p.d - 0.12, mats.trim, false);
-}
-function insideFootprint(x, z, object) {
-  return Math.abs(x - object.x) <= object.w / 2 && Math.abs(z - object.z) <= object.d / 2;
-}
-function surfaceAt(x, z) {
-  let height = 0;
-  for (const p of platforms) {
-    if (insideFootprint(x, z, p)) height = Math.max(height, p.h + 0.09);
+const zones = [
+  { x: 0, z: 0, w: 12, d: 12, material: zoneMaterials[0] },
+  { x: -11, z: 0, w: 7, d: 16, material: zoneMaterials[1] },
+  { x: 11, z: 0, w: 7, d: 16, material: zoneMaterials[2] },
+  { x: 0, z: -11, w: 16, d: 7, material: zoneMaterials[2] },
+  { x: 0, z: 11, w: 16, d: 7, material: zoneMaterials[1] },
+  { x: -13, z: -13, w: 7, d: 7, material: zoneMaterials[0] },
+  { x: 13, z: -13, w: 7, d: 7, material: zoneMaterials[1] },
+  { x: -13, z: 13, w: 7, d: 7, material: zoneMaterials[2] },
+  { x: 13, z: 13, w: 7, d: 7, material: zoneMaterials[0] },
+];
+for (const zone of zones) {
+  const panel = new GFX.Mesh(new GFX.PlaneGeometry(zone.w, zone.d), zone.material);
+  panel.rotation.x = -Math.PI / 2;
+  panel.position.set(zone.x, 0.014, zone.z);
+  panel.receiveShadow = true;
+  scene.add(panel);
+  for (const z of [zone.z - zone.d / 2, zone.z + zone.d / 2]) {
+    const line = new GFX.Mesh(new GFX.PlaneGeometry(zone.w, 0.075), mats.trim);
+    line.rotation.x = -Math.PI / 2;
+    line.position.set(zone.x, 0.022, z);
+    scene.add(line);
   }
-  return height;
 }
-// Platform sides block movement until Sam is high enough to clear their tops.
-function canMoveTo(x, z, feetY) {
-  for (const p of platforms) {
-    if (insideFootprint(x, z, p) && feetY < p.h + 0.09 - 0.18) return false;
-  }
-  return true;
+function surfaceAt() {
+  return 0.12;
+}
+function canMoveTo(x, z) {
+  return x > -23.2 && x < 23.2 && z > -23.2 && z < 23.2;
 }
 
-// The destination is a ground-level upload terminal, not a building.
 const deliveryPad = addCylinder(DATA_CENTER.x, 0.05, DATA_CENTER.z + 5.4, 2.5, 0.1, mats.trim, 48);
 deliveryPad.material = new GFX.MeshStandardMaterial({
   color: '#a6ff52', emissive: '#4d9b1c', emissiveIntensity: 0.7,
@@ -225,7 +205,7 @@ addBox(DATA_CENTER.x, 0.28, DATA_CENTER.z + 5.4, 1.0, 0.48, 0.85, mats.dark);
 const sam = createModel(GFX, robot, { detail: 0.86 });
 scene.add(sam.group);
 sam.group.scale.setScalar(0.98);
-const START = { x: 0, z: 15 };
+const START = { x: 0, z: 18 };
 const player = { x: START.x, z: START.z, y: surfaceAt(START.x, START.z), vy: 0, yaw: Math.PI, health: 100, ram: 0, delivered: 0, invulnerable: 0, attackCooldown: 0, grounded: true };
 sam.group.position.set(player.x, player.y, player.z);
 
@@ -248,14 +228,16 @@ function spawnRam(x, z, amount = 1) {
   ramItems.push({ group, x, z, amount, phase: Math.random() * Math.PI * 2, active: true });
 }
 [
-  [-12, 0], [-12, -12], [-12, 12], [12, -12], [12, 12], [0, -12],
-  [0, 12], [-7, 0], [7, 0], [0, -6.5], [0, 6.5], [2.5, 1.5],
+  [-15, -14], [-7, -14], [0, -14], [8, -14], [15, -14],
+  [-15, -6], [-7, -6], [7, -6], [15, -6],
+  [-15, 4], [-7, 4], [7, 4], [15, 4],
+  [-12, 14], [0, 12], [12, 14],
 ].forEach(([x, z], i) => spawnRam(x, z, i % 4 === 0 ? 2 : 1));
 
 // Opponents are intentionally generic cast-library people, not real individuals.
 const cast = [punk, critic, punk, critic, punk, critic, punk];
 const enemySpots = [
-  [-12, 2], [12, 2], [-12, -12], [12, -12], [-12, 12], [12, 12], [0, -12],
+  [-17, -10], [17, -10], [-17, 2], [17, 2], [-10, 12], [10, 12], [0, -18],
 ];
 const enemies = enemySpots.map(([x, z], i) => {
   const model = createModel(GFX, cast[i % cast.length], { detail: 0.72 });
@@ -390,8 +372,8 @@ stage.run((rawDt) => {
     if (canMoveTo(player.x, nextZ, player.y)) player.z = nextZ;
     player.yaw = Math.atan2(mx, mz);
   }
-  player.x = Math.max(-21.5, Math.min(21.5, player.x));
-  player.z = Math.max(-21.5, Math.min(21.5, player.z));
+  player.x = Math.max(-22.8, Math.min(22.8, player.x));
+  player.z = Math.max(-22.8, Math.min(22.8, player.z));
 
   const previousY = player.y;
   if (player.grounded && jumpQueued) {
@@ -410,7 +392,7 @@ stage.run((rawDt) => {
   } else {
     player.grounded = false;
   }
-  if (player.y < -12) respawnPlayer();
+  if (player.y < -0.2) respawnPlayer();
 
   player.attackCooldown = Math.max(0, player.attackCooldown - dt);
   player.invulnerable = Math.max(0, player.invulnerable - dt);
@@ -471,8 +453,8 @@ stage.run((rawDt) => {
       if (canMoveTo(nextX, enemy.z, enemyY)) enemy.x = nextX;
       if (canMoveTo(enemy.x, nextZ, enemyY)) enemy.z = nextZ;
     }
-    enemy.x = Math.max(-21, Math.min(21, enemy.x));
-    enemy.z = Math.max(-21, Math.min(21, enemy.z));
+    enemy.x = Math.max(-22.5, Math.min(22.5, enemy.x));
+    enemy.z = Math.max(-22.5, Math.min(22.5, enemy.z));
     enemy.model.group.position.set(enemy.x, surfaceAt(enemy.x, enemy.z), enemy.z);
     if (Math.abs(vx) + Math.abs(vz) > 0.01) enemy.model.group.rotation.y = Math.atan2(vx, vz);
     enemy.model.pose({ clip: 'walk', t: elapsed + enemy.phase, time: elapsed });
