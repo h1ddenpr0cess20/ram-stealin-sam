@@ -49,7 +49,7 @@ const ui = {
   winCopy: document.querySelector('#win-copy'),
 };
 const TARGET_RAM = 20;
-const DATA_CENTER = { x: 14, z: -8 };
+const DATA_CENTER = { x: 18, z: -17 };
 let started = false;
 let won = false;
 let toastTimer = 0;
@@ -248,14 +248,14 @@ function spawnRam(x, z, amount = 1) {
   ramItems.push({ group, x, z, amount, phase: Math.random() * Math.PI * 2, active: true });
 }
 [
-  [-14, 1], [-5, 12], [4, 15], [12, 4], [4, -10], [-14, -11],
-  [-7, -3], [1, -6], [11, -14], [15, -1], [-1, 5], [7, 7],
+  [-12, 0], [-12, -12], [-12, 12], [12, -12], [12, 12], [0, -12],
+  [0, 12], [-7, 0], [7, 0], [0, -6.5], [0, 6.5], [2.5, 1.5],
 ].forEach(([x, z], i) => spawnRam(x, z, i % 4 === 0 ? 2 : 1));
 
 // Opponents are intentionally generic cast-library people, not real individuals.
 const cast = [punk, critic, punk, critic, punk, critic, punk];
 const enemySpots = [
-  [-13, 8], [-2, 8], [5, -4], [14, 8], [-14, -14], [4, 16], [12, -14],
+  [-12, 2], [12, 2], [-12, -12], [12, -12], [-12, 12], [12, 12], [0, -12],
 ];
 const enemies = enemySpots.map(([x, z], i) => {
   const model = createModel(GFX, cast[i % cast.length], { detail: 0.72 });
