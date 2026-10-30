@@ -137,8 +137,9 @@ function addRing(x, z, radius, material) {
   return mesh;
 }
 
-// Continuous ground-level industrial campus. All visible zones are flush
-// material overlays on one uninterrupted floor; no gaps or floating landings.
+// Industrial parkour course: a continuous catch floor sits below a real,
+// elevated platform route. Falling off a deck means a recoverable drop, not a
+// hole in the world. Platform tops and collision heights share one definition.
 const asphaltTexture = paintAsphalt(GFX);
 const concreteTexture = paintConcrete(GFX);
 const plateTexture = paintPlate(GFX);
@@ -147,53 +148,82 @@ const surfaceMaterial = (paint, tint, roughness, metalness, repeat = 1) => new G
   color: tint,
   map: tiled(GFX, paint.map, repeat, repeat),
   bumpMap: tiled(GFX, paint.bump, repeat, repeat),
-  bumpScale: 0.055,
+  bumpScale: 0.065,
   roughness,
   metalness,
 });
-mats.ground = surfaceMaterial(asphaltTexture, '#899397', 0.95, 0.02, 10);
+mats.ground = surfaceMaterial(asphaltTexture, '#69777b', 0.96, 0.02, 12);
 const floor = new GFX.Mesh(new GFX.PlaneGeometry(48, 48), mats.ground);
 floor.rotation.x = -Math.PI / 2;
 floor.position.y = 0;
 floor.receiveShadow = true;
 scene.add(floor);
 
-const zoneMaterials = [
-  surfaceMaterial(concreteTexture, '#a0a9aa', 0.92, 0.02, 3),
-  surfaceMaterial(plateTexture, '#9aa6aa', 0.48, 0.58, 3),
-  surfaceMaterial(grateTexture, '#7d8c91', 0.68, 0.4, 3),
+const platformFinishes = [
+  surfaceMaterial(concreteTexture, '#a0aaad', 0.9, 0.02, 2),
+  surfaceMaterial(plateTexture, '#9aa7aa', 0.48, 0.58, 2),
+  surfaceMaterial(grateTexture, '#7e8e92', 0.66, 0.42, 2),
 ];
-const zones = [
-  { x: 0, z: 0, w: 12, d: 12, material: zoneMaterials[0] },
-  { x: -11, z: 0, w: 7, d: 16, material: zoneMaterials[1] },
-  { x: 11, z: 0, w: 7, d: 16, material: zoneMaterials[2] },
-  { x: 0, z: -11, w: 16, d: 7, material: zoneMaterials[2] },
-  { x: 0, z: 11, w: 16, d: 7, material: zoneMaterials[1] },
-  { x: -13, z: -13, w: 7, d: 7, material: zoneMaterials[0] },
-  { x: 13, z: -13, w: 7, d: 7, material: zoneMaterials[1] },
-  { x: -13, z: 13, w: 7, d: 7, material: zoneMaterials[2] },
-  { x: 13, z: 13, w: 7, d: 7, material: zoneMaterials[0] },
+const platforms = [
+  // Start deck and first climb.
+  { x: 0, z: 17, w: 7, d: 7, h: 0.9, finish: 0, label: 'START' },
+  { x: 0, z: 9, w: 6, d: 6, h: 1.1, finish: 1 },
+  // West route, then the central transfer hub.
+  { x: -7, z: 4, w: 6, d: 6, h: 1.3, finish: 2 },
+  { x: -14, z: -1, w: 7, d: 7, h: 1.5, finish: 1 },
+  { x: -7, z: -7, w: 6, d: 6, h: 1.3, finish: 0 },
+  { x: 0, z: -1, w: 9, d: 9, h: 1.45, finish: 0, label: 'HUB' },
+  // North spur and mirrored east route form a loop back to the start.
+  { x: 0, z: -10, w: 6, d: 6, h: 1.7, finish: 2 },
+  { x: 7, z: -7, w: 6, d: 6, h: 1.3, finish: 1 },
+  { x: 14, z: -1, w: 7, d: 7, h: 1.5, finish: 2 },
+  { x: 7, z: 4, w: 6, d: 6, h: 1.3, finish: 1 },
+  // Optional high-risk outer ledges branch from the hub and upper spur.
+  { x: -15, z: -12, w: 5, d: 5, h: 1.9, finish: 2 },
+  { x: 15, z: -12, w: 5, d: 5, h: 1.9, finish: 2 },
+  { x: 0, z: -18, w: 7, d: 6, h: 2.05, finish: 1 },
 ];
-for (const zone of zones) {
-  const panel = new GFX.Mesh(new GFX.PlaneGeometry(zone.w, zone.d), zone.material);
-  panel.rotation.x = -Math.PI / 2;
-  panel.position.set(zone.x, 0.014, zone.z);
-  panel.receiveShadow = true;
-  scene.add(panel);
-  for (const z of [zone.z - zone.d / 2, zone.z + zone.d / 2]) {
-    const line = new GFX.Mesh(new GFX.PlaneGeometry(zone.w, 0.075), mats.trim);
-    line.rotation.x = -Math.PI / 2;
-    line.position.set(zone.x, 0.022, z);
-    scene.add(line);
+for (const [index, p] of platforms.entries()) {
+  // Solid box is the physical deck; the textured plane sits exactly at the
+  // height returned by surfaceAt() below.
+  addBox(p.x, p.h / 2, p.z, p.w, p.h, p.d, mats.dark, false);
+  const top = new GFX.Mesh(new GFX.PlaneGeometry(p.w - 0.12, p.d - 0.12), platformFinishes[p.finish]);
+  top.rotation.x = -Math.PI / 2;
+  top.position.set(p.x, p.h + 0.08, p.z);
+  top.receiveShadow = true;
+  scene.add(top);
+
+  // High-contrast perimeter markings clarify every landing edge.
+  const edgeY = p.h + 0.105;
+  const edgeMat = index % 3 === 0 ? mats.trim : mats.warning;
+  addBox(p.x, edgeY, p.z - p.d / 2 + 0.055, p.w - 0.16, 0.035, 0.075, edgeMat, false);
+  addBox(p.x, edgeY, p.z + p.d / 2 - 0.055, p.w - 0.16, 0.035, 0.075, edgeMat, false);
+  addBox(p.x - p.w / 2 + 0.055, edgeY, p.z, 0.075, 0.035, p.d - 0.16, edgeMat, false);
+  addBox(p.x + p.w / 2 - 0.055, edgeY, p.z, 0.075, 0.035, p.d - 0.16, edgeMat, false);
+}
+function insideFootprint(x, z, object, margin = 0) {
+  return Math.abs(x - object.x) <= object.w / 2 - margin
+    && Math.abs(z - object.z) <= object.d / 2 - margin;
+}
+function surfaceAt(x, z) {
+  let height = 0.12; // Continuous asphalt catch floor.
+  for (const p of platforms) {
+    if (insideFootprint(x, z, p)) height = Math.max(height, p.h + 0.08);
   }
+  return height;
 }
-function surfaceAt() {
-  return 0.12;
-}
-function canMoveTo(x, z) {
-  return x > -23.2 && x < 23.2 && z > -23.2 && z < 23.2;
+// Prevent walking through platform sides. The 0.05 tolerance is deliberately
+// tighter than the landing snap tolerance so a descending player cannot enter
+// a deck's footprint below its top and tunnel through it.
+function canMoveTo(x, z, feetY) {
+  if (x < -23.2 || x > 23.2 || z < -23.2 || z > 23.2) return false;
+  for (const p of platforms) {
+    if (insideFootprint(x, z, p, 0.08) && feetY < p.h + 0.08 - 0.05) return false;
+  }
+  return true;
 }
 
+// The upload terminal is a ground-level objective beyond the elevated route.
 const deliveryPad = addCylinder(DATA_CENTER.x, 0.05, DATA_CENTER.z + 5.4, 2.5, 0.1, mats.trim, 48);
 deliveryPad.material = new GFX.MeshStandardMaterial({
   color: '#a6ff52', emissive: '#4d9b1c', emissiveIntensity: 0.7,
@@ -205,7 +235,7 @@ addBox(DATA_CENTER.x, 0.28, DATA_CENTER.z + 5.4, 1.0, 0.48, 0.85, mats.dark);
 const sam = createModel(GFX, robot, { detail: 0.86 });
 scene.add(sam.group);
 sam.group.scale.setScalar(0.98);
-const START = { x: 0, z: 18 };
+const START = { x: 0, z: 17 };
 const player = { x: START.x, z: START.z, y: surfaceAt(START.x, START.z), vy: 0, yaw: Math.PI, health: 100, ram: 0, delivered: 0, invulnerable: 0, attackCooldown: 0, grounded: true };
 sam.group.position.set(player.x, player.y, player.z);
 
@@ -228,16 +258,15 @@ function spawnRam(x, z, amount = 1) {
   ramItems.push({ group, x, z, amount, phase: Math.random() * Math.PI * 2, active: true });
 }
 [
-  [-15, -14], [-7, -14], [0, -14], [8, -14], [15, -14],
-  [-15, -6], [-7, -6], [7, -6], [15, -6],
-  [-15, 4], [-7, 4], [7, 4], [15, 4],
-  [-12, 14], [0, 12], [12, 14],
+  [0, 17], [0, 9], [-7, 4], [-14, -1], [-7, -7],
+  [0, -1], [0, -10], [7, -7], [14, -1], [7, 4],
+  [-15, -12], [15, -12], [0, -18], [-14, 8], [14, 8], [18, -12],
 ].forEach(([x, z], i) => spawnRam(x, z, i % 4 === 0 ? 2 : 1));
 
 // Opponents are intentionally generic cast-library people, not real individuals.
 const cast = [punk, critic, punk, critic, punk, critic, punk];
 const enemySpots = [
-  [-17, -10], [17, -10], [-17, 2], [17, 2], [-10, 12], [10, 12], [0, -18],
+  [-7, 4], [-14, -1], [-7, -7], [7, -7], [14, -1], [7, 4], [0, -18],
 ];
 const enemies = enemySpots.map(([x, z], i) => {
   const model = createModel(GFX, cast[i % cast.length], { detail: 0.72 });
@@ -392,7 +421,7 @@ stage.run((rawDt) => {
   } else {
     player.grounded = false;
   }
-  if (player.y < -0.2) respawnPlayer();
+  if (player.y < -3) respawnPlayer();
 
   player.attackCooldown = Math.max(0, player.attackCooldown - dt);
   player.invulnerable = Math.max(0, player.invulnerable - dt);
@@ -450,8 +479,8 @@ stage.run((rawDt) => {
       const nextX = enemy.x + vx * eSpeed * dt;
       const nextZ = enemy.z + vz * eSpeed * dt;
       const enemyY = surfaceAt(enemy.x, enemy.z);
-      if (canMoveTo(nextX, enemy.z, enemyY)) enemy.x = nextX;
-      if (canMoveTo(enemy.x, nextZ, enemyY)) enemy.z = nextZ;
+      if (canMoveTo(nextX, enemy.z, enemyY) && Math.abs(surfaceAt(nextX, enemy.z) - enemyY) < 0.5) enemy.x = nextX;
+      if (canMoveTo(enemy.x, nextZ, enemyY) && Math.abs(surfaceAt(enemy.x, nextZ) - enemyY) < 0.5) enemy.z = nextZ;
     }
     enemy.x = Math.max(-22.5, Math.min(22.5, enemy.x));
     enemy.z = Math.max(-22.5, Math.min(22.5, enemy.z));
