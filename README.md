@@ -23,4 +23,6 @@ Collect RAM sticks around the plaza and from knocked-out opponents. Carry it to 
 
 Collect RAM sticks, raid rival tech workers for their RAM, and deliver enough hardware to the data center.
 
-The player currently uses the engine's `agent` cast member as a placeholder.
+The player currently uses the engine's `robot` cast member (the Robot Waiter) as a placeholder.
+
+The player's temporary model is the engine's **Robot Waiter** (`madness-engine/characters/robot`).
