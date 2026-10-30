@@ -290,7 +290,7 @@ function attack() {
     const dx = enemy.x - player.x, dz = enemy.z - player.z;
     const distance = Math.hypot(dx, dz);
     const dot = distance > 0.001 ? (dx * fx + dz * fz) / distance : 1;
-    if (distance < 2.45 && dot > -0.2 && Math.abs(surfaceAt(enemy.x, enemy.z) - player.y) < 2.0) {
+    if (distance < 3.0 && dot > -0.45 && Math.abs(surfaceAt(enemy.x, enemy.z) - player.y) < 2.0) {
       enemy.hp -= 1;
       const pushedX = enemy.x + fx * 0.48;
       const pushedZ = enemy.z + fz * 0.48;
@@ -364,7 +364,7 @@ stage.run((rawDt) => {
   const [mx, mz] = toGround(input.stick(), stage.view.yaw);
   const magnitude = Math.min(1, Math.hypot(mx, mz));
   const sprint = keys.has('ShiftLeft') || keys.has('ShiftRight');
-  const speed = sprint ? 8.6 : 5.8;
+  const speed = sprint ? 10.2 : 7.2;
   if (magnitude > 0.08) {
     const nextX = player.x + mx * speed * dt;
     const nextZ = player.z + mz * speed * dt;
@@ -437,16 +437,16 @@ stage.run((rawDt) => {
     const distance = Math.hypot(dx, dz);
     let vx = 0, vz = 0;
     if (enemy.stun <= 0) {
-      if (distance < 8.5 && distance > 1.2) {
+      if (distance < 10 && distance > 1.25) {
         vx = dx / distance; vz = dz / distance;
-      } else if (distance >= 8.5) {
+      } else if (distance >= 10) {
         const a = elapsed * 0.45 + enemy.phase;
         const tx = enemy.homeX + Math.cos(a) * 1.45;
         const tz = enemy.homeZ + Math.sin(a) * 1.45;
         const txd = tx - enemy.x, tzd = tz - enemy.z, td = Math.hypot(txd, tzd);
         if (td > 0.1) { vx = txd / td; vz = tzd / td; }
       }
-      const eSpeed = distance < 8.5 ? 2.6 : 1.25;
+      const eSpeed = distance < 10 ? 2.15 : 1.0;
       const nextX = enemy.x + vx * eSpeed * dt;
       const nextZ = enemy.z + vz * eSpeed * dt;
       const enemyY = surfaceAt(enemy.x, enemy.z);
@@ -458,9 +458,9 @@ stage.run((rawDt) => {
     enemy.model.group.position.set(enemy.x, surfaceAt(enemy.x, enemy.z), enemy.z);
     if (Math.abs(vx) + Math.abs(vz) > 0.01) enemy.model.group.rotation.y = Math.atan2(vx, vz);
     enemy.model.pose({ clip: 'walk', t: elapsed + enemy.phase, time: elapsed });
-    if (distance < 1.32 && enemy.attackTimer <= 0 && enemy.stun <= 0 && player.invulnerable <= 0) {
+    if (distance < 1.28 && enemy.attackTimer <= 0 && enemy.stun <= 0 && player.invulnerable <= 0) {
       enemy.attackTimer = 1.0;
-      player.health = Math.max(0, player.health - 12);
+      player.health = Math.max(0, player.health - 8);
       player.invulnerable = 0.72;
       // dx/distance points from the attacker to Sam, so adding it repels him.
       const repelX = player.x + dx / Math.max(0.01, distance) * 0.65;
