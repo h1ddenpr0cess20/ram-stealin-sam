@@ -43,6 +43,7 @@ const streetlampDefinition = { ...engineStreetlamp, bones: [] };
 const input = createInput(host, {
   // Pointer movement is measured from Sam's projected screen position.
   anchor() {
+    if (primaryPointer && !primaryPointer.dragged) return null;
     const projected = new GFX.Vector3(player.x, player.y + 0.9, player.z).project(stage.camera);
     const rect = host.getBoundingClientRect();
     if (!Number.isFinite(projected.x) || !Number.isFinite(projected.y)) return null;
@@ -85,6 +86,9 @@ let attackQueued = false;
 let jumpQueued = false;
 let raidQueued = false;
 let primaryPointer = null;
+let suppressNextClick = false;
+let raidTarget = null;
+let attackTarget = null;
 
 const audio = createAudio({ storageKey: 'ram-stealin-sam.muted', glue: true });
 function wakeAudio() {
@@ -107,8 +111,8 @@ addEventListener('keydown', (event) => {
   if (event.target instanceof HTMLButtonElement && event.code === 'Space') return;
   keys.add(event.code);
   if (started && !won && event.code === 'Space') jumpQueued = true;
-  if (started && !won && event.code === 'KeyF') attackQueued = true;
-  if (started && !won && event.code === 'KeyE') raidQueued = true;
+  if (started && !won && event.code === 'KeyF') { attackTarget=null;attackQueued=true; }
+  if (started && !won && event.code === 'KeyE') { raidTarget=null;raidQueued=true; }
   if (event.code === 'KeyM') {
     const nowMuted = audio.toggleMute();
     showToast(nowMuted ? 'AUDIO MUTED' : 'AUDIO ON');
@@ -133,7 +137,7 @@ document.querySelector('#attack-button').addEventListener('pointerdown', (event)
   }
   if(!nearby){showToast('NO ONE IN MELEE RANGE');return;}
   player.yaw=Math.atan2(nearby.x-player.x,nearby.z-player.z);
-  attackQueued=true;wakeAudio();
+  attackTarget=nearby;attackQueued=true;wakeAudio();
 });
 document.querySelector('#jump-button').addEventListener('pointerdown', (event) => {
   event.preventDefault();
@@ -160,21 +164,27 @@ function handlePrimaryClick(screenX,screenY){
  let selected=null,best=Infinity;
  for(const property of properties){
   if(property.raided||!activeProperty(property))continue;
-  const worldDistance=Math.hypot(player.x-property.doorX,player.z-property.doorZ);
-  if(worldDistance>3.35)continue;
-  const screenDistance=projectedDistance(property.doorX,0.95,property.doorZ,screenX,screenY);
-  if(screenDistance<62&&screenDistance<best){selected={kind:'raid',property};best=screenDistance;}
+  const distance=Math.hypot(player.x-property.doorX,player.z-property.doorZ);
+  if(distance>3.8)continue;
+  const doorDistance=projectedDistance(property.doorX,0.95,property.doorZ,screenX,screenY);
+  const facadeDistance=projectedDistance(property.x,1.2,property.z,screenX,screenY);
+  const screenDistance=Math.min(doorDistance,facadeDistance);
+  if(screenDistance<86&&screenDistance<best){selected={kind:'raid',property};best=screenDistance;}
  }
  for(const person of townsfolk){
   if(person.hp<=0)continue;
-  const worldDistance=Math.hypot(player.x-person.x,player.z-person.z);
-  if(worldDistance>2.45)continue;
-  const screenDistance=projectedDistance(person.x,0.95,person.z,screenX,screenY);
-  if(screenDistance<48&&screenDistance<best){selected={kind:'attack',person};best=screenDistance;}
+  if(Math.hypot(player.x-person.x,player.z-person.z)>2.6)continue;
+  const screenDistance=projectedDistance(person.x,1.05,person.z,screenX,screenY);
+  if(screenDistance<58&&screenDistance<best){selected={kind:'attack',person};best=screenDistance;}
+ }
+ if(!selected){
+  const property=nearestProperty();
+  if(property)selected={kind:'raid',property};
  }
  if(!selected){showToast('GET CLOSER — CLICK A FRONT DOOR OR TOWNSPERSON');return;}
- if(selected.kind==='raid')raidQueued=true;
+ if(selected.kind==='raid'){raidTarget=selected.property;raidQueued=true;}
  else{
+  attackTarget=selected.person;
   player.yaw=Math.atan2(selected.person.x-player.x,selected.person.z-player.z);
   attackQueued=true;
  }
@@ -182,31 +192,26 @@ function handlePrimaryClick(screenX,screenY){
 }
 host.addEventListener('pointerdown',(event)=>{
  if(event.pointerType!=='mouse'||event.button!==0)return;
- event.preventDefault();
- event.stopImmediatePropagation();
- primaryPointer={id:event.pointerId,x:event.clientX,y:event.clientY,
-  startedAt:performance.now(),dragged:false};
- host.setPointerCapture?.(event.pointerId);
+ primaryPointer={id:event.pointerId,x:event.clientX,y:event.clientY,dragged:false};
+ suppressNextClick=false;
 },{capture:true});
 host.addEventListener('pointermove',(event)=>{
  if(!primaryPointer||primaryPointer.id!==event.pointerId)return;
- event.stopImmediatePropagation();
  if(Math.hypot(event.clientX-primaryPointer.x,event.clientY-primaryPointer.y)>9)primaryPointer.dragged=true;
 },{capture:true});
 host.addEventListener('pointerup',(event)=>{
  if(!primaryPointer||primaryPointer.id!==event.pointerId)return;
- event.preventDefault();
- event.stopImmediatePropagation();
- const clicked=!primaryPointer.dragged&&performance.now()-primaryPointer.startedAt<650
-  &&Math.hypot(event.clientX-primaryPointer.x,event.clientY-primaryPointer.y)<9;
+ suppressNextClick=primaryPointer.dragged;
  primaryPointer=null;
- if(clicked)handlePrimaryClick(event.clientX,event.clientY);
 },{capture:true});
 host.addEventListener('pointercancel',(event)=>{
- if(primaryPointer&&primaryPointer.id===event.pointerId){
-  event.stopImmediatePropagation();primaryPointer=null;
- }
+ if(primaryPointer?.id===event.pointerId){suppressNextClick=true;primaryPointer=null;}
 },{capture:true});
+host.addEventListener('click',(event)=>{
+ if(event.button!==0)return;
+ if(suppressNextClick){suppressNextClick=false;return;}
+ handlePrimaryClick(event.clientX,event.clientY);
+});
 
 const mats = {
   ground: new GFX.MeshStandardMaterial({ color: '#263b3a', roughness: 0.94 }),
@@ -477,7 +482,9 @@ function rebuildNavigation(goalX,goalZ){
  }
 }
 function nextNavigationWaypoint(x,z){
- const cell=nearestWalkableCell(x,z);if(!cell)return null;
+ const raw=navCell(x,z);
+ const cell=navWalkable[raw.index]?navPosition(raw.ix,raw.iz):nearestWalkableCell(x,z);
+ if(!cell)return null;
  const distance=navDistance[cell.index];if(distance<0)return null;
  if(distance===0)return {x:player.x,z:player.z};
  let best=null,bestDistance=distance;
@@ -511,18 +518,6 @@ function moveTownsperson(person,targetX,targetZ,speed,dt){
   else break;
  }
  return moved;
-}
-function chooseWanderTarget(person){
- for(let attempt=0;attempt<18;attempt++){
-  const angle=Math.random()*Math.PI*2,radius=1+Math.random()*3.5;
-  const x=person.homeX+Math.cos(angle)*radius,z=person.homeZ+Math.sin(angle)*radius;
-  if(canMoveTo(x,z)&&segmentIsClear(person.x,person.z,x,z)){
-   person.wanderX=x;person.wanderZ=z;person.wanderTimer=2.2+Math.random()*2.5;return;
-  }
- }
- const safe=nearestWalkableCell(person.x,person.z);
- person.wanderX=safe?safe.x:person.homeX;person.wanderZ=safe?safe.z:person.homeZ;
- person.wanderTimer=1.2;
 }
 addBox(0,0.65,35,2.8,1.25,4.2,mats.dark);
 addBox(0,1.35,35,2.45,0.32,2.35,mats.dark);
@@ -607,9 +602,13 @@ function activeProperty(property){
  const kind=LEVELS[player.level-1].kind;
  return kind==='ALL'||property.kind===kind;
 }
-function nearestProperty(){
+function levelRamRemaining(){
  const level=LEVELS[player.level-1];
- if(player.levelLootReleased>=level.target-player.levelDelivered)return null;
+ const loose=ramItems.reduce((sum,item)=>sum+(item.active?item.amount:0),0);
+ return Math.max(0,level.target-player.levelDelivered-player.ram-loose);
+}
+function nearestProperty(){
+ if(levelRamRemaining()<=0)return null;
  let nearest=null,best=3.35;
  for(const p of properties){
   if(p.raided||!activeProperty(p))continue;
@@ -654,7 +653,7 @@ function updateHud(){
   ui.status.textContent=raidPrompt.kind==='HOME'
    ?'Residence stash: '+raidPrompt.loot+' RAM • neighbours will respond.'
    :'Business stash: '+raidPrompt.loot+' RAM • alarms draw a stronger response.';
- }else if(player.levelLootReleased>=level.target-player.levelDelivered){
+ }else if(levelRamRemaining()<=0){
   ui.objective.textContent='COLLECT THE LOOSE RAM AND RETURN TO THE VAN';
   ui.status.textContent='Level '+player.level+' stash: '+(player.levelDelivered+player.ram)+' / '+level.target+' RAM.';
  }else if(player.ram>0){
@@ -667,11 +666,11 @@ function updateHud(){
  drawRadar();
 }
 updateHud();
-function raidProperty(){
- const property=nearestProperty();
- if(!property){showToast('GET CLOSER TO AN UNRAIDED FRONT DOOR');return;}
+function raidProperty(target=null){
+ const property=target||nearestProperty();
+ if(!property||property.raided||!activeProperty(property)||Math.hypot(player.x-property.doorX,player.z-property.doorZ)>3.8){showToast('GET CLOSER TO AN UNRAIDED FRONT DOOR');return;}
  const level=LEVELS[player.level-1];
- const remaining=Math.max(0,level.target-player.levelDelivered-player.levelLootReleased);
+ const remaining=levelRamRemaining();
  const stash=Math.min(property.loot,remaining);
  if(stash<=0){showToast('ALL LEVEL RAM FOUND — RETURN TO THE VAN');return;}
  property.raided=true;player.raids++;player.score+=stash*45;player.levelLootReleased+=stash;
@@ -691,7 +690,7 @@ function raidProperty(){
  tone(560,0.18,0.2);updateHud();
 }
 
-function attack(){
+function attack(target=null){
  if(player.attackCooldown>0||!started||won)return;
  player.combo=player.comboTimer>0?(player.combo%3)+1:1;player.comboTimer=1;
  player.attackCooldown=player.combo===3?0.62:0.38;swingTime=0.58;
@@ -699,7 +698,7 @@ function attack(){
  const fx=Math.sin(player.yaw),fz=Math.cos(player.yaw),reach=player.combo===3?3.1:2.55;
  let hits=0;
  for(const person of townsfolk){
-  if(person.hp<=0)continue;
+  if(person.hp<=0||(target&&person!==target))continue;
   const dx=person.x-player.x,dz=person.z-player.z,distance=Math.hypot(dx,dz);
   const dot=distance>0.001?(dx*fx+dz*fz)/distance:1;
   if(distance>reach||dot<0.1)continue;
@@ -779,14 +778,19 @@ function deliverRam(){
 }
 function respawnPlayer(){
  const lost=Math.floor(player.ram/2);
- for(let i=0;i<lost;i++){
-  const angle=i*2.4,x=player.x+Math.cos(angle)*0.65,z=player.z+Math.sin(angle)*0.65;
-  const safe=nearestWalkableCell(x,z);
-  if(safe)spawnRam(safe.x,safe.z,1);
+ player.ram-=lost;
+ for(const item of ramItems){
+  if(item.active){item.active=false;scene.remove(item.group);}
  }
- player.ram-=lost;player.x=START.x;player.z=START.z;player.y=surfaceAt(START.x,START.z);
+ for(const property of properties){
+  if(activeProperty(property))property.raided=false;
+ }
+ player.levelLootReleased=player.levelDelivered+player.ram;
+ player.x=START.x;player.z=START.z;player.y=surfaceAt(START.x,START.z);
  player.vy=0;player.grounded=true;player.health=65;player.invulnerable=2;player.combo=0;
  jumpQueued=false;attackQueued=false;raidQueued=false;
+ raidTarget=null;attackTarget=null;primaryPointer=null;suppressNextClick=false;
+ for(const person of townsfolk){person.windup=0;person.stun=0;person.attackTimer=0;}
  showToast(lost?'GETAWAY RESPAWN — LOST '+lost+' RAM':'GETAWAY RESPAWN — BACK ON THE STREET');
  updateHud();
 }
@@ -818,8 +822,8 @@ stage.run((rawDt)=>{
  if(player.vy<=0&&previousY>=support-0.06&&player.y<=support){player.y=support;player.vy=0;player.grounded=true;}
  else player.grounded=false;
  if(player.y< -7)respawnPlayer();
- if(raidQueued)raidProperty();raidQueued=false;
- if(attackQueued)attack();attackQueued=false;
+ if(raidQueued)raidProperty(raidTarget);raidQueued=false;raidTarget=null;
+ if(attackQueued)attack(attackTarget);attackQueued=false;attackTarget=null;
  sam.group.position.set(player.x,player.y,player.z);sam.group.rotation.y=player.yaw;
  sam.group.rotation.z=player.invulnerable>0?Math.sin(elapsed*26)*0.07:0;
  sam.pose({clip:swingTime>0?'attack':magnitude>0.1?'walk':'idle',t:swingTime>0?0.58-swingTime:elapsed,time:elapsed,speed:sprint?1.35:1});
@@ -859,22 +863,18 @@ stage.run((rawDt)=>{
       if(person.windup===0&&distance<1.8&&person.stun<=0)hurtPlayer(person,distance);
     }
     let moving=false;
-    if(person.stun<=0&&person.windup<=0){
-      if(person.aggro&&distance>1.25){
-        const waypoint=nextNavigationWaypoint(person.x,person.z);
-        moving=moveTownsperson(person,waypoint?waypoint.x:player.x,waypoint?waypoint.z:player.z,person.speed,dt);
-      }else if(!person.aggro){
-        person.wanderTimer-=dt;
-        const wanderDistance=Math.hypot(person.wanderX-person.x,person.wanderZ-person.z);
-        if(person.wanderTimer<=0||wanderDistance<0.18)chooseWanderTarget(person);
-        moving=moveTownsperson(person,person.wanderX,person.wanderZ,person.speed*0.42,dt);
-        if(!moving&&wanderDistance>0.25)person.wanderTimer=0;
+    if(person.stun<=0&&person.windup<=0&&person.aggro&&distance>1.25){
+      const waypoint=nextNavigationWaypoint(person.x,person.z);
+      if(waypoint){
+        const oldX=person.x,oldZ=person.z;
+        moving=moveTownsperson(person,waypoint.x,waypoint.z,person.speed,dt);
+        if(moving)person.model.group.rotation.y=Math.atan2(person.x-oldX,person.z-oldZ);
       }
     }
     person.x=Math.max(-39,Math.min(39,person.x));
     person.z=Math.max(-39,Math.min(39,person.z));
     person.model.group.position.set(person.x,surfaceAt(person.x,person.z),person.z);
-    if(moving)person.model.group.rotation.y=Math.atan2(player.x-person.x,player.z-person.z);
+    if(!moving&&person.aggro)person.model.group.rotation.y=Math.atan2(player.x-person.x,player.z-person.z);
     person.model.pose({
       clip:person.stun>0?'hit':person.windup>0?'attack':moving?'walk':'idle',
       t:elapsed+person.phase,time:elapsed,
