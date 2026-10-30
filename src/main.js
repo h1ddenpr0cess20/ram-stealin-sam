@@ -211,13 +211,18 @@ function townSurface(name,width,depth,tint){
  const key=[name,width,depth,tint||''].join(':');
  if(townSurfaceCache.has(key))return townSurfaceCache.get(key);
  const base=surfaceMaterial(GFX,name);
- const material=base.clone();
- material.name='town-surface-'+name;
- material.vertexColors=false;
- material.map=tileTownTexture(GFX,base.map,width,depth);
- material.bumpMap=tileTownTexture(GFX,base.bumpMap,width,depth);
- material.color.set(tint||SURFACES[name]?.top||'#ffffff');
- material.needsUpdate=true;
+ const material=new GFX.MeshPhysicalMaterial({
+  name:'town-surface-'+name,
+  color:tint||SURFACES[name]?.top||'#ffffff',
+  vertexColors:false,
+  map:tileTownTexture(GFX,base.map,width,depth),
+  bumpMap:tileTownTexture(GFX,base.bumpMap,width,depth),
+  bumpScale:base.bumpScale,
+  roughness:base.roughness,
+  metalness:base.metalness,
+  clearcoat:base.clearcoat,
+  clearcoatRoughness:base.clearcoatRoughness,
+ });
  townSurfaceCache.set(key,material);
  return material;
 }
