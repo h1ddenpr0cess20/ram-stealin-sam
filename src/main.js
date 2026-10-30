@@ -24,7 +24,7 @@ import './style.css';
 // import when the final Sam sculpt is ready; gameplay is decoupled from the cast.
 const host = document.querySelector('#game');
 const stage = await createStage(host, {
-  sky: paintSky(),
+  sky: paintSky((x, z) => (Math.atan2(z, x) / (Math.PI * 2) + 1) % 1),
   room: paintRoom(),
   ui: [document.querySelector('#overlay')],
   label: 'ram-stealin-sam',
@@ -556,7 +556,7 @@ stage.run((rawDt)=>{
 globalThis.ramStealinSam = {
   player,
   stage,
-  enemies,
+  townsfolk,
   get ramPickups() { return ramItems.filter((item) => item.active).length; },
   get raidableProperties() { return properties.filter((item) => !item.raided).length; },
   get townsfolk() { return townsfolk.filter((item) => item.hp > 0).length; },
