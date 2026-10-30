@@ -73,9 +73,10 @@ addEventListener('keydown', (event) => {
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
   wakeAudio();
   if (event.repeat) return;
+  if (event.target instanceof HTMLButtonElement && event.code === 'Space') return;
   keys.add(event.code);
-  if (event.code === 'Space') jumpQueued = true;
-  if (event.code === 'KeyF') attackQueued = true;
+  if (started && !won && event.code === 'Space') jumpQueued = true;
+  if (started && !won && event.code === 'KeyF') attackQueued = true;
   if (event.code === 'KeyM') {
     const nowMuted = audio.toggleMute();
     showToast(nowMuted ? 'AUDIO MUTED' : 'AUDIO ON');
@@ -274,13 +275,16 @@ function updateHud() {
   ui.objective.textContent = player.delivered >= TARGET_RAM
     ? 'Quarterly target met. Get out.'
     : `Collect RAM. Deliver ${TARGET_RAM - player.delivered} more to the data center.`;
+  ui.status.textContent = player.ram > 0
+    ? `Carrying ${player.ram} RAM. Return to the glowing delivery pad.`
+    : 'The data center is always hungry.';
 }
 updateHud();
 
 function attack() {
   if (player.attackCooldown > 0 || !started || won) return;
   player.attackCooldown = 0.48;
-  swingTime = 0.22;
+  swingTime = 0.9;
   tone(210, 0.12, 0.16);
   let hits = 0;
   const fx = Math.sin(player.yaw), fz = Math.cos(player.yaw);
@@ -336,8 +340,7 @@ function respawnPlayer() {
 stage.run((rawDt) => {
   const dt = Math.min(rawDt, 0.05);
   elapsed += dt;
-  input.take(); // Drain unused tap presses so input state stays bounded.
-  input.take(); // discard pointer-tap/gamepad presses not used by this game
+  input.take(); // Drain pointer taps and unused gamepad presses.
   if (toastTimer > 0) {
     toastTimer -= dt;
     if (toastTimer <= 0) ui.toast.classList.remove('show');
@@ -397,7 +400,7 @@ stage.run((rawDt) => {
   sam.group.position.set(player.x, player.y, player.z);
   sam.group.rotation.y = player.yaw;
   sam.group.rotation.z = player.invulnerable > 0 ? Math.sin(elapsed * 28) * 0.08 : 0;
-  sam.pose({ clip: swingTime > 0 ? 'attack' : (magnitude > 0.1 ? 'walk' : 'idle'), t: swingTime > 0 ? 0.22 - swingTime : elapsed, time: elapsed });
+  sam.pose({ clip: swingTime > 0 ? 'attack' : (magnitude > 0.1 ? 'walk' : 'idle'), t: swingTime > 0 ? 0.9 - swingTime : elapsed, time: elapsed });
 
   for (const item of ramItems) {
     if (!item.active) continue;

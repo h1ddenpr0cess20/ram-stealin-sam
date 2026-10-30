@@ -12,9 +12,11 @@ npm run dev
 ## Controls
 
 - WASD / arrow keys: move
+- Left mouse drag: move toward pointer
 - Right/middle mouse drag: orbit camera
 - Space: jump
 - F: RAM raid (close-range attack)
+- Mobile: on-screen jump and RAM raid buttons
 - Shift: sprint
 - M: mute audio
 - Mouse drag on the arena: move toward the pointer
