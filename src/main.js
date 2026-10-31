@@ -789,15 +789,23 @@ function raidProperty(target=null){
  const stash=Math.min(property.loot,remaining);
  if(stash<=0){showToast(activeMap==='neighbourhood'?'ALL LEVEL RAM FOUND — RETURN TO THE VAN':'ALL LEVEL RAM FOUND — RETURN TO THE EXIT PAD');return;}
  property.raided=true;player.raids++;player.score+=stash*45;player.levelLootReleased+=stash;
- const sideX=Math.cos(property.yaw),sideZ=-Math.sin(property.yaw);
- const facingX=Math.sin(property.yaw),facingZ=Math.cos(property.yaw);
- for(let i=0;i<stash;i++){
-  const lane=(i%3)-1,row=Math.floor(i/3),outward=(row%2)*0.42;
-  spawnRam(
-   property.doorX+sideX*lane*0.56+facingX*outward,
-   property.doorZ+sideZ*lane*0.56+facingZ*outward,
-   1
-  );
+ if(activeMap==='neighbourhood'){
+  // Exterior house/shop raids credit the stash immediately. This avoids
+  // losing first-level loot to a ground-pickup placement/collection failure.
+  player.ram+=stash;
+  player.score+=stash*25;
+ }else{
+  // Interior computer and production raids retain their physical DIMM drops.
+  const sideX=Math.cos(property.yaw),sideZ=-Math.sin(property.yaw);
+  const facingX=Math.sin(property.yaw),facingZ=Math.cos(property.yaw);
+  for(let i=0;i<stash;i++){
+   const lane=(i%3)-1,row=Math.floor(i/3),outward=(row%2)*0.42;
+   spawnRam(
+    property.doorX+sideX*lane*0.56+facingX*outward,
+    property.doorZ+sideZ*lane*0.56+facingZ*outward,
+    1
+   );
+  }
  }
  effects.ring(property.doorX,0,property.doorZ,{colour:'#a6ff52',reach:2.8,life:0.55});
  sparkBurst(property.doorX,0.6,property.doorZ,22);alertTownfolk(property);
