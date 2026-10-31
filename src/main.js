@@ -100,6 +100,8 @@ let attackQueued = false;
 let jumpQueued = false;
 let raidQueued = false;
 let primaryPointer = null;
+let pointerClickHandledAt = -Infinity;
+let ignoreClickUntil = 0;
 let raidTarget = null;
 let attackTarget = null;
 
@@ -226,8 +228,8 @@ function handlePrimaryClick(screenX,screenY){
 // synthetic click event. Handle intentional clicks on pointerup instead,
 // while allowing the engine's pointer listeners to continue handling drags.
 host.addEventListener('pointerdown',(event)=>{
- if(event.pointerType!=='mouse'||event.button!==0)return;
- primaryPointer={id:event.pointerId,x:event.clientX,y:event.clientY,dragged:false,startedAt:performance.now()};
+ if(event.button!==0)return;
+ primaryPointer={id:event.pointerId,x:event.clientX,y:event.clientY,dragged:false,startedAt:performance.now(),pointerType:event.pointerType};
 },{capture:true});
 host.addEventListener('pointermove',(event)=>{
  if(!primaryPointer||primaryPointer.id!==event.pointerId)return;
@@ -235,14 +237,34 @@ host.addEventListener('pointermove',(event)=>{
 },{capture:true});
 host.addEventListener('pointerup',(event)=>{
  if(!primaryPointer||primaryPointer.id!==event.pointerId)return;
- const clicked=!primaryPointer.dragged&&performance.now()-primaryPointer.startedAt<650
-  &&Math.hypot(event.clientX-primaryPointer.x,event.clientY-primaryPointer.y)<9;
+ const pointer=primaryPointer;
+ const now=performance.now();
+ const clicked=!pointer.dragged&&now-pointer.startedAt<650
+  &&Math.hypot(event.clientX-pointer.x,event.clientY-pointer.y)<9;
  primaryPointer=null;
- if(clicked)handlePrimaryClick(event.clientX,event.clientY);
+ if(clicked){
+  pointerClickHandledAt=now;
+  handlePrimaryClick(event.clientX,event.clientY);
+ }else if(pointer.dragged){
+  ignoreClickUntil=now+700;
+ }
 },{capture:true});
 host.addEventListener('pointercancel',(event)=>{
- if(primaryPointer?.id===event.pointerId)primaryPointer=null;
+ if(primaryPointer?.id===event.pointerId){
+  primaryPointer=null;
+  ignoreClickUntil=performance.now()+700;
+ }
 },{capture:true});
+// Keep the native click path as a fallback. Pointerup handles browsers where
+// createInput suppresses click; this listener covers touch/pen/browser cases
+// where only click is delivered. Time-window deduplication prevents double raids.
+host.addEventListener('click',(event)=>{
+ if(event.button!==0)return;
+ const now=performance.now();
+ if(now<ignoreClickUntil){ignoreClickUntil=0;return;}
+ if(now-pointerClickHandledAt<700){pointerClickHandledAt=-Infinity;return;}
+ handlePrimaryClick(event.clientX,event.clientY);
+});
 
 const mats = {
   ground: new GFX.MeshStandardMaterial({ color: '#263b3a', roughness: 0.94 }),
@@ -453,7 +475,7 @@ for(const row of rows)row.entries.forEach(([type,label,loot],i)=>{
   const fp=FOOTPRINTS[type]??[2,2],halfW=fp[0]*0.5*BUILDING_SCALE,halfD=fp[1]*0.5*BUILDING_SCALE;
   // Keep the raid point and every spawned DIMM beyond the actual building footprint.
   // The old 0.38-depth offset placed loot inside larger building meshes.
-  const front=halfD+1.35,fx=Math.sin(yaw),fz=Math.cos(yaw);
+  const front=fp[1]*0.38*BUILDING_SCALE+0.78,fx=Math.sin(yaw),fz=Math.cos(yaw);
   properties.push({id:propertyIndex++,type,label,kind:row.kind,baseLoot:loot,loot,x,z,yaw,halfW,halfD,
     doorX:x+fx*front,doorZ:z+fz*front,raided:false});
 });
