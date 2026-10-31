@@ -59,6 +59,16 @@ export function buildInteriorLevel(GFX, root, kind, townSurface) {
       color: '#a6ff52', emissive: '#4b9c17', emissiveIntensity: 1.3,
     }),
     rug: new GFX.MeshStandardMaterial({ color: house ? '#874a3f' : '#344d62', roughness: 0.98 }),
+    // A solid, unlit floor is the guaranteed visual ground plane. It does not
+    // depend on the painted texture canvas or the current interior lighting.
+    floor: new GFX.MeshBasicMaterial({
+      color: house ? '#8b704f' : factory ? '#59656a' : store ? '#858d91' : '#697983',
+      side: GFX.DoubleSide,
+    }),
+    floorSeam: new GFX.MeshBasicMaterial({
+      color: house ? '#624b36' : '#46545a',
+      side: GFX.DoubleSide,
+    }),
     trim: new GFX.MeshStandardMaterial({ color: '#b7a98b', roughness: 0.65 }),
   };
 
@@ -115,7 +125,21 @@ export function buildInteriorLevel(GFX, root, kind, townSurface) {
 
   // Floor, skirting and the four walls. The open roof keeps the interior
   // visible from the elevated third-person camera while the beams read as a ceiling.
-  addPlane(0, 0, width, depth, 0.015, floorMaterial);
+  // Use a thin solid floor slab rather than relying only on a textured plane.
+  // This remains visible even if a browser/GPU fails to upload a canvas texture.
+  addBox(0, -0.08, 0, width, 0.16, depth, mat.floor, false);
+  if (house) {
+    for (let z = -halfD + 0.7; z < halfD; z += 1.45) {
+      addBox(0, 0.008, z, width - 0.3, 0.012, 0.018, mat.floorSeam, false);
+    }
+  } else {
+    for (let x = -halfW + 1; x < halfW; x += 3.5) {
+      addBox(x, 0.008, 0, 0.018, 0.012, depth - 0.3, mat.floorSeam, false);
+    }
+    for (let z = -halfD + 1; z < halfD; z += 3.5) {
+      addBox(0, 0.008, z, width - 0.3, 0.012, 0.018, mat.floorSeam, false);
+    }
+  }
   const sideMat = house || store ? mat.plaster : mat.brick;
   addBox(-halfW + 0.18, wallHeight / 2, 0, 0.36, wallHeight, depth, sideMat);
   addBox(halfW - 0.18, wallHeight / 2, 0, 0.36, wallHeight, depth, sideMat);

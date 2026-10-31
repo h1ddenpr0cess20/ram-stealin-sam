@@ -14,8 +14,7 @@ import cop from 'madness-engine/characters/cop';
 import security from 'madness-engine/characters/security';
 import { createEffects } from 'madness-engine/effects';
 import { createBuildings, FOOTPRINTS } from 'madness-engine/buildings';
-import { Batch, Mesher } from 'madness-engine/mesher';
-import { FLORA } from 'madness-engine/flora';
+import { Batch } from 'madness-engine/mesher';
 import { buildInteriorLevel } from './interiors.js';
 import { wallMaterial, surfaceMaterial } from 'madness-engine/textures/town/textures';
 import { tiled as tileTownTexture } from 'madness-engine/textures/town/paint';
@@ -24,20 +23,39 @@ import { paintRoom } from 'madness-engine/textures/rooms/town';
 import { paintSky } from 'madness-engine/textures/skies/town';
 import './style.css';
 
+const loadingScreen=document.querySelector('#loading-screen');
+const loadingFill=document.querySelector('#loading-fill');
+const loadingPercent=document.querySelector('#loading-percent');
+const loadingTrack=document.querySelector('#loading-track');
+const loadingStatus=document.querySelector('#loading-status');
+function setLoadingProgress(percent,message){
+ const value=Math.max(0,Math.min(100,Math.round(percent)));
+ if(loadingFill)loadingFill.style.width=value+'%';
+ if(loadingPercent)loadingPercent.textContent=String(value).padStart(2,'0')+'%';
+ if(loadingTrack)loadingTrack.setAttribute('aria-valuenow',String(value));
+ if(loadingStatus)loadingStatus.textContent=message;
+}
+const nextPaint=()=>new Promise(resolve=>requestAnimationFrame(()=>resolve()));
+setLoadingProgress(7,'Loading game engine and visual assets…');
+await nextPaint();
+
 // Temporary player cast: the engine's tin-can Robot Waiter. Replace this
 // import when the final Sam sculpt is ready; gameplay is decoupled from the cast.
 const host = document.querySelector('#game');
 const stage = await createStage(host, {
-  sky: paintSky(domeU),
+  sky: paintSky(domeU,{width:1024}),
   lights: LIGHTS,
   shadows: true,
-  shadowSize: 2048,
+  shadowSize: 1024,
+  pixelRatio: 1.5,
   fixtures: 8,
-  room: paintRoom(),
+  room: paintRoom(512),
   ui: [document.querySelector('#overlay')],
   label: 'ram-stealin-sam',
 });
 const { scene } = stage;
+setLoadingProgress(24,'Starting the 3D renderer…');
+await nextPaint();
 let mapRoot = new GFX.Group();
 scene.add(mapRoot);
 let mapBounds = { minX: -40, maxX: 40, minZ: -40, maxZ: 40 };
@@ -266,6 +284,8 @@ host.addEventListener('click',(event)=>{
  handlePrimaryClick(event.clientX,event.clientY);
 });
 
+setLoadingProgress(30,'Preparing materials and scene geometry…');
+await nextPaint();
 const mats = {
   ground: new GFX.MeshStandardMaterial({ color: '#263b3a', roughness: 0.94 }),
   concrete: new GFX.MeshStandardMaterial({ color: '#46545a', roughness: 0.82 }),
@@ -382,6 +402,8 @@ function addEngineScenery(definition,x,z,yaw=0,scale=1){
 function addRoadStripe(x,z,w,d,material=mats.roadWhite) {
   addBox(x,0.058,z,w,0.018,d,material,false);
 }
+setLoadingProgress(39,'Building streets, lighting and neighbourhood scenery…');
+await nextPaint();
 const ground = new GFX.Mesh(new GFX.PlaneGeometry(84,84),groundMat);
 ground.rotation.x=-Math.PI/2; ground.receiveShadow=true; mapRoot.add(ground);
 const horizontalRoads=[-14,0,14,28], verticalRoads=[-28,0,28];
@@ -447,6 +469,8 @@ function buildingMaterial(name){
  buildingMaterials.set(name,material);
  return material;
 }
+setLoadingProgress(51,'Generating the neighbourhood buildings…');
+await nextPaint();
 const BUILDING_SCALE=1.8, cityBatch=new Batch(), parkBatch=new Batch();
 parkBatch.stamp(buildingLibrary.modelFor('park',{variant:3}).parts,0,0,-35,0,2);
 for(const [name,acc] of parkBatch.accs){
@@ -469,7 +493,14 @@ const rows=[
   ['dingbat','Marina Flats',5],['aptblock','Palm Terrace',5],['ranchhouse','Mission House',4]]},
 ];
 const lotXs=[-24,-16,-8,8,16,24];let propertyIndex=0;
-for(const row of rows)row.entries.forEach(([type,label,loot],i)=>{
+for(const row of rows){
+ for(let i=0;i<row.entries.length;i++){
+  if(propertyIndex>0&&propertyIndex%6===0){
+   const progress=51+Math.floor(propertyIndex/24*12);
+   setLoadingProgress(progress,'Generating neighbourhood buildings ('+propertyIndex+'/24)…');
+   await nextPaint();
+  }
+  const [type,label,loot]=row.entries[i];
   const x=lotXs[i],z=row.z,yaw=row.yaw;
   cityBatch.stamp(buildingLibrary.modelFor(type,{level:type==='aptblock'?3:2,variant:propertyIndex%8}).parts,x,0,z,yaw,BUILDING_SCALE);
   const fp=FOOTPRINTS[type]??[2,2],halfW=fp[0]*0.5*BUILDING_SCALE,halfD=fp[1]*0.5*BUILDING_SCALE;
@@ -478,7 +509,10 @@ for(const row of rows)row.entries.forEach(([type,label,loot],i)=>{
   const front=fp[1]*0.38*BUILDING_SCALE+0.78,fx=Math.sin(yaw),fz=Math.cos(yaw);
   properties.push({id:propertyIndex++,type,label,kind:row.kind,baseLoot:loot,loot,x,z,yaw,halfW,halfD,
     doorX:x+fx*front,doorZ:z+fz*front,raided:false});
-});
+ }
+}
+setLoadingProgress(66,'Finishing the neighbourhood mesh…');
+await nextPaint();
 for(const [name,acc] of cityBatch.accs){
   const mesh=new GFX.Mesh(acc.geometry(GFX),buildingMaterial(name));
   mesh.castShadow=true;mesh.receiveShadow=true;mapRoot.add(mesh);
@@ -636,7 +670,9 @@ function sparkBurst(x,y,z,count=14,material=mats.ram){
     mesh:()=>new GFX.Mesh(sparkGeometry,material),scale:[0.55,1.2],bounce:0.16});
 }
 // The player's model is deliberately replaceable: this cast member is a stand-in.
-const sam = createModel(GFX, robot, { detail: 0.86 });
+setLoadingProgress(72,'Baking Sam and crowd character models…');
+await nextPaint();
+const sam = createModel(GFX, robot, { detail: 0.78 });
 scene.add(sam.group);
 sam.group.scale.setScalar(0.98);
 const player={x:START.x,z:START.z,y:surfaceAt(START.x,START.z),vy:0,yaw:Math.PI,
@@ -700,10 +736,18 @@ const citizenSpots=[
  [-28,-3],[-28,10],[28,-10],[28,3],[-12,-3],[12,3],[-12,14],[12,-14],[-6,28],[6,-28],[-28,20],[28,-20],[-6,3],[6,-3],
  [-34,-8],[34,8],[-20,-29],[20,-29],[-34,25],[34,25],[-4,-23],[4,-23],[-22,10],[22,-10],
 ];
-const townsfolk=citizenSpots.map(([spawnX,spawnZ],i)=>{
+const townsfolk=[];
+for(let i=0;i<citizenSpots.length;i++){
+ if(i%4===0){
+  setLoadingProgress(76+Math.floor(i/citizenSpots.length*17),'Baking crowd models ('+i+'/'+citizenSpots.length+')…');
+  await nextPaint();
+ }
+ const [spawnX,spawnZ]=citizenSpots[i];
  const safeSpawn=nearestWalkableCell(spawnX,spawnZ);
  const x=safeSpawn?safeSpawn.x:spawnX,z=safeSpawn?safeSpawn.z:spawnZ;
- const model=createModel(GFX,citizenCast[i%citizenCast.length],{detail:0.72});scene.add(model.group);
+ const model=createModel(GFX,citizenCast[i%citizenCast.length],{detail:0.6});scene.add(model.group);
+ // Crowd shadows are omitted to reduce shadow-map work across the 24 skinned meshes.
+ model.mesh.castShadow=false;
  model.group.scale.setScalar(i%5===4?0.96:0.9);
  const cast=citizenCast[i%citizenCast.length];
  const isCop=cast===cop,isSecurity=cast===security,isVendor=cast===vendor;
@@ -715,17 +759,23 @@ const townsfolk=citizenSpots.map(([spawnX,spawnZ],i)=>{
   speed:baseSpeed,baseSpeed,damage:baseDamage,baseDamage,
   aggro:false,stun:0,windup:0,attackTimer:0,respawn:0,phase:i*1.31,
   wanderX:x,wanderZ:z,wanderTimer:Math.random()*1.5};
- model.group.position.set(x,surfaceAt(x,z),z);return person;
-});
+ model.group.position.set(x,surfaceAt(x,z),z);
+ townsfolk.push(person);
+}
 function alertTownfolk(property){
+ levelRaids++;
  const candidates=townsfolk.filter(p=>p.hp>0&&!p.aggro)
   .map(person=>({person,distance:Math.hypot(person.x-property.doorX,person.z-property.doorZ)}))
   .sort((a,b)=>a.distance-b.distance);
- candidates.slice(0,player.raids<2?6:12).forEach(({person,distance})=>{if(distance<30)person.aggro=true;});
- if(player.raids>=2)townsfolk.filter(p=>p.kind==='COP'||p.kind==='SECURITY').forEach(p=>{p.aggro=true;});
- if(player.raids>=4)townsfolk.forEach(p=>{if(p.hp>0)p.aggro=true;});
+ const responseCount=Math.min(6+(levelRaids-1)*3,15);
+ candidates.slice(0,responseCount).forEach(({person,distance})=>{if(distance<30)person.aggro=true;});
+ if(levelRaids>=2)townsfolk.filter(p=>p.kind==='COP'||p.kind==='SECURITY').forEach(p=>{if(p.hp>0)p.aggro=true;});
+ // Residents do not dog-pile Sam on level entry. A second alarm in the house
+ // brings the whole household running; larger venues escalate after three raids.
+ if(levelRaids>=(activeMap==='house'?2:3))townsfolk.forEach(p=>{if(p.hp>0)p.aggro=true;});
 }
 let elapsed=0,swingTime=0,raidPrompt=null;
+let levelRaids=0;
 stage.target.set(player.x,player.y+1.2,player.z);stage.view.zoomBy(1.12);
 function activeProperty(property){
  const kind=LEVELS[player.level-1].kind;
@@ -880,6 +930,7 @@ function buildNextMap(level){
  mapRoot=new GFX.Group();scene.add(mapRoot);
  streetLampSockets.length=0;streetLightingRefresh=0;
  activeMap=level.map;
+ levelRaids=0;
  const layout=buildInteriorLevel(GFX,mapRoot,level.kind,townSurface);
  mapBounds=layout.bounds;mapObstacles=layout.obstacles;mapRadar=layout.radar;
  properties=layout.properties;
@@ -896,8 +947,9 @@ function buildNextMap(level){
   person.maxHp=Math.ceil(person.baseHp*(1+0.28*(player.level-1)));
   person.hp=person.maxHp;person.speed=person.baseSpeed*level.threat;
   person.damage=Math.round(person.baseDamage*(1+0.2*(player.level-1)));
-  person.aggro=true;person.stun=0;person.windup=0;person.attackTimer=0;
-  person.respawn=0;person.wanderTimer=0;person.model.group.visible=true;
+  person.aggro=false;person.stun=0;person.windup=0;person.attackTimer=0;
+  person.respawn=0;person.wanderTimer=0.25+(i%6)*0.12;
+  person.wanderX=x;person.wanderZ=z;person.model.group.visible=true;
   person.model.group.position.set(x,surfaceAt(x,z),z);
  }
  const medSpawns=layout.spawnPoints.filter((_,i)=>i%6===0);
@@ -907,9 +959,10 @@ function buildNextMap(level){
  }
  stage.target.set(player.x,player.y+1.2,player.z);
  stage.view.reset();
- // Sam faces down the room (-Z). Align the camera with the wide front
- // doorway so a front-wall wing cannot occlude the entire interior.
- stage.view.turn(-Math.PI / 4, 0);
+ // Place the camera above and behind Sam, centred on the open front entrance.
+ // The wide, steeper view frames the floor, furniture and the full resident crowd.
+ stage.view.turn(-Math.PI / 4, 0.52);
+ stage.view.zoomBy(1.8);
  stage.view.step(0,true);
  navigationRefresh=0;
 }
@@ -1040,11 +1093,29 @@ stage.run((rawDt)=>{
       if(person.windup===0&&distance<2.05&&person.stun<=0)hurtPlayer(person,distance);
     }
     let moving=false;
-    if(person.stun<=0&&person.windup<=0&&person.aggro&&distance>1.25){
-      const waypoint=nextNavigationWaypoint(person.x,person.z);
+    if(person.stun<=0&&person.windup<=0){
       const oldX=person.x,oldZ=person.z;
-      if(waypoint)moving=moveTownsperson(person,waypoint.x,waypoint.z,person.speed,dt);
-      if(!moving)moving=moveTownspersonDirect(person,dt);
+      if(person.aggro&&distance>1.25){
+        const waypoint=nextNavigationWaypoint(person.x,person.z);
+        if(waypoint)moving=moveTownsperson(person,waypoint.x,waypoint.z,person.speed,dt);
+        if(!moving)moving=moveTownspersonDirect(person,dt);
+      }else if(!person.aggro){
+        // Unalerted locals patrol a small area around their assigned room position.
+        // This keeps the interior populated without sending everyone into a pile-up.
+        person.wanderTimer-=dt;
+        const roamDistance=Math.hypot(person.wanderX-person.x,person.wanderZ-person.z);
+        if(person.wanderTimer<=0||roamDistance<0.3){
+          const angle=person.phase+elapsed*0.22;
+          const safe=nearestWalkableCell(
+            person.homeX+Math.cos(angle)*2.0,
+            person.homeZ+Math.sin(angle)*2.0
+          );
+          person.wanderX=safe?safe.x:person.homeX;
+          person.wanderZ=safe?safe.z:person.homeZ;
+          person.wanderTimer=2.6+(person.phase%1.4);
+        }
+        if(roamDistance>0.3)moving=moveTownsperson(person,person.wanderX,person.wanderZ,person.speed*0.22,dt);
+      }
       if(moving)person.model.group.rotation.y=Math.atan2(person.x-oldX,person.z-oldZ);
     }
     person.x=Math.max(mapBounds.minX,Math.min(mapBounds.maxX,person.x));
@@ -1067,6 +1138,10 @@ stage.run((rawDt)=>{
  hudRefresh-=dt;
  if(hudRefresh<=0){hudRefresh=0.12;updateHud();}
 });
+setLoadingProgress(100,'All assets ready. Opening the title screen…');
+ui.start.hidden=false;
+await nextPaint();
+loadingScreen?.classList.add('is-complete');
 globalThis.ramStealinSam = {
   player,
   stage,

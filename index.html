@@ -1,5 +1,9 @@
 <!doctype html>
-<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="theme-color" content="#0a1018"/><title>RAM STEALIN' SAM — FIVE MAP HEIST</title></head>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="theme-color" content="#0a1018"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800;900&family=DM+Mono:wght@400;500&display=swap" media="print" onload="this.media='all'"/>
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800;900&family=DM+Mono:wght@400;500&display=swap"/></noscript><title>RAM STEALIN' SAM — FIVE MAP HEIST</title></head>
 <body><main id="game"></main><section id="overlay" aria-live="polite">
 <header class="topbar"><div class="brand"><span class="brand-mark">R</span><span>RAM STEALIN' SAM <small>PACIFIC HEIGHTS / FIVE MAP HEIST</small></span></div>
 <div class="stats">
@@ -16,9 +20,35 @@
 <footer class="controls"><span><kbd>WASD</kbd> MOVE</span><span><kbd>SPACE</kbd> JUMP</span><span><kbd>E</kbd> RAID DOOR</span><span><kbd>F</kbd> FIGHT</span><span><kbd>SHIFT</kbd> SPRINT</span><span><kbd>LEFT CLICK</kbd> RAID / ATTACK</span><span><kbd>DRAG</kbd> MOVE</span><span><kbd>RIGHT DRAG</kbd> LOOK</span><span><kbd>M</kbd> MUTE</span></footer>
 <div class="mobile-hint">Drag to move · raid doors and fight using the buttons</div>
 <div class="mobile-actions"><button id="jump-button" aria-label="Jump">JUMP</button><button id="raid-button" aria-label="Raid property">RAID</button><button id="attack-button" aria-label="Fight">FIGHT</button></div>
-<div id="start-screen"><div class="start-card"><p class="eyebrow">PACIFIC HEIGHTS / 02:13 AM</p><h1>RAM<br/><em>STEALIN'</em><br/>SAM</h1>
+<div id="start-screen" hidden><div class="start-card"><p class="eyebrow">PACIFIC HEIGHTS / 02:13 AM</p><h1>RAM<br/><em>STEALIN'</em><br/>SAM</h1>
 <p>Five separate maps. Raid Pacific Heights, search a house and office tower for computers, hit an electronics store, then break into a RAM factory and take its production line apart.</p>
 <div class="briefing"><span><b>148</b> RAM TO FENCE</span><span><b>05</b> LEVELS</span><span><b>LOCALS</b> VERY AWAKE</span></div>
 <button id="start-button">START THE NIGHT RUN</button><small>WASD / arrows move · E raids doors · F fights · Space jumps · Shift sprints · right-drag looks around · left-click raids or attacks</small></div></div>
 <div id="win-screen" hidden><div class="start-card"><p class="eyebrow">PACIFIC HEIGHTS / JOB COMPLETE</p><h2>THE JOB<br/><em>IS DONE.</em></h2><p id="win-copy">148 RAM fenced. Five maps cleared.</p><button id="play-again">RUN IT BACK</button></div></div>
-</section><script type="module" src="/src/main.js"></script></body></html>
+</section>
+<section id="loading-screen" role="status" aria-live="polite" aria-label="Loading game">
+ <div class="loading-card">
+  <div class="loading-brand"><span class="brand-mark">R</span><span>RAM STEALIN' SAM<small>FIVE MAP HEIST</small></span></div>
+  <p class="eyebrow">PREPARING PACIFIC HEIGHTS</p>
+  <h2>LOADING THE NIGHT RUN</h2>
+  <p id="loading-status">Loading game engine and visual assets…</p>
+  <div class="loading-track" role="progressbar" aria-label="Game loading progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="5" id="loading-track"><i id="loading-fill"></i></div>
+  <div class="loading-meta"><strong id="loading-percent">05%</strong><span>PLEASE WAIT</span></div>
+ </div>
+</section>
+<script>
+(() => {
+ const fail = (detail) => {
+  const screen = document.getElementById('loading-screen');
+  if (!screen || screen.classList.contains('is-complete')) return;
+  const status = document.getElementById('loading-status');
+  const percent = document.getElementById('loading-percent');
+  if (status) status.textContent = 'STARTUP ERROR — ' + String(detail || 'Unable to initialize the game');
+  if (percent) percent.textContent = 'ERROR';
+  screen.classList.add('loading-failed');
+ };
+ window.addEventListener('error', (event) => fail(event.message));
+ window.addEventListener('unhandledrejection', (event) => fail(event.reason?.message || event.reason));
+})();
+</script>
+<script type="module" src="/src/main.js"></script></body></html>
