@@ -14,10 +14,6 @@ export function buildInteriorLevel(GFX, root, kind, townSurface) {
   const halfW = width / 2;
   const halfD = depth / 2;
   const wallHeight = house ? 5.4 : factory ? 7.2 : store ? 5.9 : 6.4;
-  const floorMaterial = house
-    ? townSurface('plank', width, depth, '#a18465')
-    : townSurface('concrete', width, depth, factory ? '#4e5b60' : store ? '#7c8589' : '#69747d');
-
   const materials = new Map();
   const wall = (texture, tint) => {
     const key = texture + ':' + tint;
@@ -128,13 +124,15 @@ export function buildInteriorLevel(GFX, root, kind, townSurface) {
   // Use a thin solid floor slab rather than relying only on a textured plane.
   // This remains visible even if a browser/GPU fails to upload a canvas texture.
   addBox(0, -0.08, 0, width, 0.16, depth, mat.floor, false);
+  const visibleFloor = addPlane(0, 0, width, depth, 0.025, mat.floor);
+  visibleFloor.frustumCulled = false;
   if (house) {
     for (let z = -halfD + 0.7; z < halfD; z += 1.45) {
-      addBox(0, 0.008, z, width - 0.3, 0.012, 0.018, mat.floorSeam, false);
+      addBox(0, 0.045, z, width - 0.3, 0.012, 0.018, mat.floorSeam, false);
     }
   } else {
     for (let x = -halfW + 1; x < halfW; x += 3.5) {
-      addBox(x, 0.008, 0, 0.018, 0.012, depth - 0.3, mat.floorSeam, false);
+      addBox(x, 0.045, 0, 0.018, 0.012, depth - 0.3, mat.floorSeam, false);
     }
     for (let z = -halfD + 1; z < halfD; z += 3.5) {
       addBox(0, 0.008, z, width - 0.3, 0.012, 0.018, mat.floorSeam, false);
@@ -156,10 +154,10 @@ export function buildInteriorLevel(GFX, root, kind, townSurface) {
     frontWallWidth, wallHeight, 0.36, sideMat);
   addBox(frontWallOffset, wallHeight / 2, halfD - 0.18,
     frontWallWidth, wallHeight, 0.36, sideMat);
-  addBox(0, wallHeight - 0.24, halfD - 0.18, doorGap, 0.48, 0.42, mat.trim);
+  // Keep the front opening full-height so no lintel/trim bar crosses the
+  // elevated camera's view into the room.
   addBox(-doorGap / 2 - 0.13, 1.25, halfD - 0.48, 0.18, 2.5, 0.22, mat.woodDark);
   addBox(doorGap / 2 + 0.13, 1.25, halfD - 0.48, 0.18, 2.5, 0.22, mat.woodDark);
-  addBox(doorGap / 2 - 0.24, 1.2, halfD - 0.56, 0.08, 2.25, 0.08, mat.wood);
 
   // Repeated ceiling beams and warm/blue fixtures create a clear indoor read.
   const beamCount = house ? 5 : 7;
@@ -424,7 +422,9 @@ export function buildInteriorLevel(GFX, root, kind, townSurface) {
   // Start/exit separation makes each interior a real raid route rather than
   // placing Sam directly on top of the extraction pad.
   const exit = house ? { x: 0, z: -10.0 } : factory ? { x: 0, z: -14.6 } : store ? { x: 0, z: -12.6 } : { x: 0, z: -11.6 };
-  const start = house ? { x: 0, z: 9.1 } : factory ? { x: 0, z: 14.1 } : store ? { x: 0, z: 12.1 } : { x: 0, z: 11.1 };
+  // Set Sam far enough inside that the third-person camera also begins inside
+  // the venue rather than looking into the room from outside its front wall.
+  const start = house ? { x: 0, z: 6.4 } : factory ? { x: 0, z: 12.2 } : store ? { x: 0, z: 9.4 } : { x: 0, z: 7.0 };
   addPlane(exit.x, exit.z, 2.8, 2.8, 0.045, mat.greenGlow);
   const ring = new GFX.Mesh(new GFX.TorusGeometry(1.25, 0.075, 10, 48), mat.greenGlow);
   ring.rotation.x = -Math.PI / 2;

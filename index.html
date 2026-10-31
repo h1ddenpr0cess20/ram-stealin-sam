@@ -1,5 +1,12 @@
 <!doctype html>
 <html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="theme-color" content="#0a1018"/>
+<style>
+#loading-screen{position:fixed;z-index:9999;inset:0;display:grid;place-items:center;padding:20px;background:#070d12;color:#edf4ef;font-family:Arial,sans-serif}
+#loading-screen .loading-card{width:min(440px,calc(100vw - 36px));padding:30px;background:#060d11;border:1px solid #a6ff5260}
+#loading-screen .loading-brand{font-weight:900;letter-spacing:.12em}
+#loading-screen .loading-track{height:7px;background:#1b2928}
+#loading-screen .loading-track i{display:block;width:5%;height:100%;background:#a6ff52}
+</style>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800;900&family=DM+Mono:wght@400;500&display=swap" media="print" onload="this.media='all'"/>
@@ -47,7 +54,9 @@
   if (percent) percent.textContent = 'ERROR';
   screen.classList.add('loading-failed');
  };
- window.addEventListener('error', (event) => fail(event.message));
+ window.addEventListener('error', (event) => {
+  if (event.target === window || event.target?.tagName === 'SCRIPT') fail(event.message || 'Game script failed to load');
+ });
  window.addEventListener('unhandledrejection', (event) => fail(event.reason?.message || event.reason));
 })();
 </script>

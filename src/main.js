@@ -959,10 +959,10 @@ function buildNextMap(level){
  }
  stage.target.set(player.x,player.y+1.2,player.z);
  stage.view.reset();
- // Place the camera above and behind Sam, centred on the open front entrance.
- // The wide, steeper view frames the floor, furniture and the full resident crowd.
+ // The interior start points keep this camera inside each room, looking across
+ // the visible floor rather than viewing the entrance from outside.
  stage.view.turn(-Math.PI / 4, 0.52);
- stage.view.zoomBy(1.8);
+ stage.view.zoomBy(1.2);
  stage.view.step(0,true);
  navigationRefresh=0;
 }
