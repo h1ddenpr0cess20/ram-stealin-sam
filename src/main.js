@@ -451,7 +451,9 @@ for(const row of rows)row.entries.forEach(([type,label,loot],i)=>{
   const x=lotXs[i],z=row.z,yaw=row.yaw;
   cityBatch.stamp(buildingLibrary.modelFor(type,{level:type==='aptblock'?3:2,variant:propertyIndex%8}).parts,x,0,z,yaw,BUILDING_SCALE);
   const fp=FOOTPRINTS[type]??[2,2],halfW=fp[0]*0.5*BUILDING_SCALE,halfD=fp[1]*0.5*BUILDING_SCALE;
-  const front=fp[1]*0.38*BUILDING_SCALE+0.78,fx=Math.sin(yaw),fz=Math.cos(yaw);
+  // Keep the raid point and every spawned DIMM beyond the actual building footprint.
+  // The old 0.38-depth offset placed loot inside larger building meshes.
+  const front=halfD+1.35,fx=Math.sin(yaw),fz=Math.cos(yaw);
   properties.push({id:propertyIndex++,type,label,kind:row.kind,baseLoot:loot,loot,x,z,yaw,halfW,halfD,
     doorX:x+fx*front,doorZ:z+fz*front,raided:false});
 });
