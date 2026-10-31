@@ -907,6 +907,9 @@ function buildNextMap(level){
  }
  stage.target.set(player.x,player.y+1.2,player.z);
  stage.view.reset();
+ // Sam faces down the room (-Z). Align the camera with the wide front
+ // doorway so a front-wall wing cannot occlude the entire interior.
+ stage.view.turn(-Math.PI / 4, 0);
  stage.view.step(0,true);
  navigationRefresh=0;
 }

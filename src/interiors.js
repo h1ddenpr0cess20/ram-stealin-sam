@@ -122,11 +122,16 @@ export function buildInteriorLevel(GFX, root, kind, townSurface) {
   addBox(0, wallHeight / 2, -halfD + 0.18, width, wallHeight, 0.36, sideMat);
 
   // Split front wall around a wide entrance; a lit lintel frames the way in.
-  const doorGap = house ? 3.2 : 4.2;
-  addBox(-(halfW + doorGap) / 2, wallHeight / 2, halfD - 0.18,
-    halfW - doorGap / 2, wallHeight, 0.36, sideMat);
-  addBox((halfW + doorGap) / 2, wallHeight / 2, halfD - 0.18,
-    halfW - doorGap / 2, wallHeight, 0.36, sideMat);
+  // Keep the entrance broad enough for the third-person camera to look
+  // through it. The previous narrow opening put the camera behind a solid
+  // front-wall segment, making the furnished interior appear like an empty lot.
+  const doorGap = house ? 8 : 9;
+  const frontWallWidth = halfW - doorGap / 2;
+  const frontWallOffset = halfW / 2 + doorGap / 4;
+  addBox(-frontWallOffset, wallHeight / 2, halfD - 0.18,
+    frontWallWidth, wallHeight, 0.36, sideMat);
+  addBox(frontWallOffset, wallHeight / 2, halfD - 0.18,
+    frontWallWidth, wallHeight, 0.36, sideMat);
   addBox(0, wallHeight - 0.24, halfD - 0.18, doorGap, 0.48, 0.42, mat.trim);
   addBox(-doorGap / 2 - 0.13, 1.25, halfD - 0.48, 0.18, 2.5, 0.22, mat.woodDark);
   addBox(doorGap / 2 + 0.13, 1.25, halfD - 0.48, 0.18, 2.5, 0.22, mat.woodDark);
@@ -342,15 +347,15 @@ export function buildInteriorLevel(GFX, root, kind, townSurface) {
 
     // Server racks at the back. Blue status bars and red alarm lights animate the silhouette.
     for (const x of [-10.5, 0, 10.5]) {
-      addBox(x, 1.8, -10.2, 2.5, 3.6, 1.4, mat.darkMetal);
-      addBox(x, 1.95, -9.45, 2.15, 3.1, 0.08, mat.black);
+      addBox(x, 1.8, -7.6, 2.5, 3.6, 1.4, mat.darkMetal);
+      addBox(x, 1.95, -6.85, 2.15, 3.1, 0.08, mat.black);
       for (let row = 0; row < 5; row++) {
         const y = 0.68 + row * 0.56;
-        addBox(x - 0.62, y, -9.37, 0.12, 0.12, 0.035, mat.screen, false);
-        addBox(x - 0.25, y, -9.37, 0.12, 0.12, 0.035, mat.redGlow, false);
-        addBox(x + 0.26, y, -9.37, 0.12, 0.12, 0.035, mat.greenGlow, false);
+        addBox(x - 0.62, y, -6.77, 0.12, 0.12, 0.035, mat.screen, false);
+        addBox(x - 0.25, y, -6.77, 0.12, 0.12, 0.035, mat.redGlow, false);
+        addBox(x + 0.26, y, -6.77, 0.12, 0.12, 0.035, mat.greenGlow, false);
       }
-      obstacle(x, -10.2, 2.7, 1.55);
+      obstacle(x, -7.6, 2.7, 1.55);
     }
 
     // Workstations and glass dividers; aisles stay open for crowd movement.
@@ -391,10 +396,13 @@ export function buildInteriorLevel(GFX, root, kind, townSurface) {
 
   // Small illuminated exit pad. It replaces the outdoor van while preserving
   // the carry-and-fence loop in an indoor map.
-  const exit = house ? { x: 0, z: 10.7 } : factory ? { x: 0, z: 15.1 } : store ? { x: 0, z: 13.2 } : { x: 0, z: 12.0 };
-  const start = house ? { x: 0, z: 6.8 } : factory ? { x: 0, z: 12.2 } : store ? { x: 0, z: 12.25 } : { x: 0, z: 11.35 };
-  addPlane(exit.x, exit.z, 3.8, 3.8, 0.045, mat.greenGlow);
-  const ring = new GFX.Mesh(new GFX.TorusGeometry(1.75, 0.075, 10, 48), mat.greenGlow);
+  // Enter at the front and extract at the opposite end of the building.
+  // Start/exit separation makes each interior a real raid route rather than
+  // placing Sam directly on top of the extraction pad.
+  const exit = house ? { x: 0, z: -10.0 } : factory ? { x: 0, z: -14.6 } : store ? { x: 0, z: -12.6 } : { x: 0, z: -11.6 };
+  const start = house ? { x: 0, z: 9.1 } : factory ? { x: 0, z: 14.1 } : store ? { x: 0, z: 12.1 } : { x: 0, z: 11.1 };
+  addPlane(exit.x, exit.z, 2.8, 2.8, 0.045, mat.greenGlow);
+  const ring = new GFX.Mesh(new GFX.TorusGeometry(1.25, 0.075, 10, 48), mat.greenGlow);
   ring.rotation.x = -Math.PI / 2;
   ring.position.set(exit.x, 0.09, exit.z);
   root.add(ring);
