@@ -594,6 +594,28 @@ function moveTownsperson(person,targetX,targetZ,speed,dt){
  }
  return moved;
 }
+// Navigation-grid fallback: keep aggressive NPCs moving even if a map
+// transition leaves their path field disconnected. Steps still obey collision.
+function moveTownspersonDirect(person,dt){
+ const dx=player.x-person.x,dz=player.z-person.z,distance=Math.hypot(dx,dz);
+ if(distance<1.3)return false;
+ const stride=Math.min(distance-1.15,person.speed*dt);
+ if(stride<=0)return false;
+ const inv=1/Math.max(0.001,distance),ux=dx*inv,uz=dz*inv;
+ const candidates=[
+  [ux*stride,uz*stride],[ux*stride,0],[0,uz*stride],
+  [(ux-uz*0.65)*stride,(uz+ux*0.65)*stride],
+  [(ux+uz*0.65)*stride,(uz-ux*0.65)*stride],
+  [0,Math.sign(dz||1)*stride],[Math.sign(dx||1)*stride,0],
+ ];
+ for(const [sx,sz] of candidates){
+  const nx=person.x+sx,nz=person.z+sz;
+  if(!canMoveTo(nx,nz))continue;
+  if(Math.hypot(player.x-nx,player.z-nz)>=distance-0.015)continue;
+  person.x=nx;person.z=nz;return true;
+ }
+ return false;
+}
 addBox(0,0.65,35,2.8,1.25,4.2,mats.dark);
 addBox(0,1.35,35,2.45,0.32,2.35,mats.dark);
 addBox(0,1.34,33.72,2.08,0.48,0.05,mats.glass,false);
@@ -884,6 +906,8 @@ function buildNextMap(level){
   if(safe)spawnMedkit(safe.x,safe.z);
  }
  stage.target.set(player.x,player.y+1.2,player.z);
+ stage.view.reset();
+ stage.view.step(0,true);
  navigationRefresh=0;
 }
 function advanceLevel(){
@@ -1015,11 +1039,10 @@ stage.run((rawDt)=>{
     let moving=false;
     if(person.stun<=0&&person.windup<=0&&person.aggro&&distance>1.25){
       const waypoint=nextNavigationWaypoint(person.x,person.z);
-      if(waypoint){
-        const oldX=person.x,oldZ=person.z;
-        moving=moveTownsperson(person,waypoint.x,waypoint.z,person.speed,dt);
-        if(moving)person.model.group.rotation.y=Math.atan2(person.x-oldX,person.z-oldZ);
-      }
+      const oldX=person.x,oldZ=person.z;
+      if(waypoint)moving=moveTownsperson(person,waypoint.x,waypoint.z,person.speed,dt);
+      if(!moving)moving=moveTownspersonDirect(person,dt);
+      if(moving)person.model.group.rotation.y=Math.atan2(person.x-oldX,person.z-oldZ);
     }
     person.x=Math.max(mapBounds.minX,Math.min(mapBounds.maxX,person.x));
     person.z=Math.max(mapBounds.minZ,Math.min(mapBounds.maxZ,person.z));
@@ -1051,5 +1074,8 @@ globalThis.ramStealinSam = {
   get map() { return activeMap; },
   get activeMapBounds() { return {...mapBounds}; },
   get levelCount() { return TOTAL_LEVELS; },
+  get mapObjectCount() { return mapRoot.children?.length ?? 0; },
+  get visibleTownsfolk() { return townsfolk.filter((person) => person.hp > 0 && person.model.group.visible).length; },
+  get aggressiveTownsfolk() { return townsfolk.filter((person) => person.hp > 0 && person.aggro).length; },
   deliverRam,
 };
