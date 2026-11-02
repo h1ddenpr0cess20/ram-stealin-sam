@@ -45,5 +45,5 @@ RAM pickups are modeled as DIMM modules with a PCB, memory chips, heat spreader 
 - The house is a 6-person household with a 20 RAM target (was 24 residents for exactly 24 RAM).
 - The getaway van is the engine's box truck with working wheels: drive it, grab RAM by driving over it, flatten townsfolk, fence on the pad.
 - Being busted drops what you carry where you fell and keeps raids done (no free re-raids).
-- Knocked-out opponents drop RAM, doors and computers have glowing beacons, there is a pause screen and a job-complete screen between levels.
+- Doors and computers have glowing beacons, there is a pause screen and a job-complete screen between levels.
 - Town lots no longer straddle the roads.

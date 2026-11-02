@@ -805,8 +805,8 @@ for(let i=0;i<citizenSpots.length;i++){
  const cast=citizenCast[i%citizenCast.length];
  const isCop=cast===cop,isSecurity=cast===security,isVendor=cast===vendor;
  const hp=isCop?4:isSecurity?4:3;
- const baseSpeed=isCop?4.0:isSecurity?3.75:isVendor?3.45:3.55;
- const baseDamage=isCop?19:isSecurity?17:isVendor?14:15;
+ const baseSpeed=isCop?3.6:isSecurity?3.3:isVendor?3.0:3.1;
+ const baseDamage=isCop?12:isSecurity?11:isVendor?8:9;
  const person={model,x,z,homeX:x,homeZ:z,hp,maxHp:hp,baseHp:hp,
   kind:isCop?'COP':isSecurity?'SECURITY':isVendor?'VENDOR':'NEIGHBOUR',
   speed:baseSpeed,baseSpeed,damage:baseDamage,baseDamage,
@@ -820,12 +820,12 @@ function alertTownfolk(property){
  const candidates=townsfolk.filter(p=>p.hp>0&&!p.aggro)
   .map(person=>({person,distance:Math.hypot(person.x-property.doorX,person.z-property.doorZ)}))
   .sort((a,b)=>a.distance-b.distance);
- const responseCount=Math.min(6+(levelRaids-1)*3,15);
- candidates.slice(0,responseCount).forEach(({person,distance})=>{if(distance<30)person.aggro=true;});
- if(levelRaids>=2)townsfolk.filter(p=>p.kind==='COP'||p.kind==='SECURITY').forEach(p=>{if(p.hp>0)p.aggro=true;});
+ const responseCount=Math.min(2+(levelRaids-1)*2,8);
+ candidates.slice(0,responseCount).forEach(({person,distance})=>{if(distance<20)person.aggro=true;});
+ if(levelRaids>=3)townsfolk.filter(p=>p.kind==='COP'||p.kind==='SECURITY').forEach(p=>{if(p.hp>0)p.aggro=true;});
  // Residents do not dog-pile Sam on level entry. A second alarm in the house
  // brings the whole household running; larger venues escalate after three raids.
- if(levelRaids>=(activeMap==='house'?2:3))townsfolk.forEach(p=>{if(p.hp>0)p.aggro=true;});
+ if(levelRaids>=(activeMap==='house'?3:5))townsfolk.forEach(p=>{if(p.hp>0)p.aggro=true;});
 }
 const beaconGeometry=new GFX.CylinderGeometry(0.5,0.5,5,20,1,true);
 const beaconMats={HOME:new GFX.MeshBasicMaterial({color:'#ffc46b',transparent:true,opacity:0.28,depthWrite:false}),
@@ -979,8 +979,7 @@ function attack(target=null){
 }
 function knockOut(person,verb){
  person.model.group.visible=false;person.respawn=18;player.kills++;player.score+=person.kind==='COP'?320:240;
- spawnRam(person.x,person.z,person.kind==='COP'?2:1);
- showToast(person.kind+' '+verb+' — THEY DROPPED RAM');tone(520,0.17,0.2);
+ showToast(person.kind+' '+verb);tone(520,0.17,0.2);
 }
 function hurtPlayer(person,distance){
  if(player.invulnerable>0)return;
@@ -1017,8 +1016,8 @@ function buildNextMap(level){
   const x=safe?safe.x:spawn[0],z=safe?safe.z:spawn[1];
   person.homeX=x;person.homeZ=z;person.x=x;person.z=z;
   person.maxHp=Math.ceil(person.baseHp*(1+0.28*(player.level-1)));
-  person.hp=person.maxHp;person.speed=person.baseSpeed*level.threat;
-  person.damage=Math.round(person.baseDamage*(1+0.2*(player.level-1)));
+  person.hp=person.maxHp;person.speed=person.baseSpeed*(1+(level.threat-1)*0.5);
+  person.damage=Math.round(person.baseDamage*(1+0.1*(player.level-1)));
   person.aggro=false;person.stun=0;person.windup=0;person.attackTimer=0;
   person.respawn=0;person.wanderTimer=0.25+(i%6)*0.12;
   person.wanderX=x;person.wanderZ=z;person.model.group.visible=true;
@@ -1219,7 +1218,7 @@ stage.run((rawDt)=>{
       t:elapsed+person.phase,time:elapsed,
     });
     if(!wasWinding&&person.aggro&&person.windup<=0&&distance<1.7&&person.attackTimer<=0&&person.stun<=0){
-      person.windup=0.32;person.attackTimer=1.05;
+      person.windup=0.5;person.attackTimer=1.7;
       effects.ring(person.x,0,person.z,{colour:'#ff6159',reach:1.25,life:0.36});
     }
   }
