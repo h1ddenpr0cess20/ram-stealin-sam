@@ -19,9 +19,12 @@ export function buildInteriorLevel(GFX, root, kind, townSurface) {
     const key = texture + ':' + tint;
     if (materials.has(key)) return materials.get(key);
     const source = wallMaterial(GFX, texture);
-    const material = source.clone();
-    material.vertexColors = false;
-    material.color.set(tint);
+    // The engine's materials have no clone(): build one from the source's textures.
+    const material = new GFX.MeshStandardMaterial({
+      name: 'interior-' + texture, color: tint, vertexColors: false,
+      map: source.map, bumpMap: source.bumpMap, bumpScale: source.bumpScale,
+      roughness: source.roughness, metalness: source.metalness,
+    });
     materials.set(key, material);
     return material;
   };
