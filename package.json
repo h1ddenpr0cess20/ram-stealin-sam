@@ -9,7 +9,7 @@
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
-    "madness-engine": "github:h1ddenpr0cess20/madness-engine#main"
+    "madness-engine": "github:h1ddenpr0cess20/madness-engine#855af07b9940889a8145f4a113fc8b664bb34328"
   },
   "devDependencies": {
     "vite": "^7.1.0"
