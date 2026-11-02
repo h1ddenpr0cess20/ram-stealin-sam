@@ -3,8 +3,9 @@ import { createAudio } from 'madness-engine/audio';
 import { createInput } from 'madness-engine/input';
 import { createStage, LIGHTS, domeU } from 'madness-engine/stage';
 import { createModel, createStatic } from 'madness-engine/models/model';
-import { streetlamp as engineStreetlamp } from 'madness-engine/scenery/street';
+import { streetlamp as engineStreetlamp, bench as engineBench, tree as engineTree } from 'madness-engine/scenery/street';
 import { toGround } from 'madness-engine/view';
+import { boxtruck, truckwheel, mountWheels } from 'madness-engine/scenery/vehicles';
 import robot from 'madness-engine/characters/robot';
 import punk from 'madness-engine/characters/punk';
 import critic from 'madness-engine/characters/critic';
@@ -15,6 +16,7 @@ import security from 'madness-engine/characters/security';
 import { createEffects } from 'madness-engine/effects';
 import { createBuildings, FOOTPRINTS } from 'madness-engine/buildings';
 import { Batch } from 'madness-engine/mesher';
+import { buildInteriorLevel } from './interiors.js';
 import { wallMaterial, surfaceMaterial } from 'madness-engine/textures/town/textures';
 import { tiled as tileTownTexture } from 'madness-engine/textures/town/paint';
 import { SURFACES } from 'madness-engine/textures/town/surfaces';
@@ -22,20 +24,44 @@ import { paintRoom } from 'madness-engine/textures/rooms/town';
 import { paintSky } from 'madness-engine/textures/skies/town';
 import './style.css';
 
+const loadingScreen=document.querySelector('#loading-screen');
+const loadingFill=document.querySelector('#loading-fill');
+const loadingPercent=document.querySelector('#loading-percent');
+const loadingTrack=document.querySelector('#loading-track');
+const loadingStatus=document.querySelector('#loading-status');
+function setLoadingProgress(percent,message){
+ const value=Math.max(0,Math.min(100,Math.round(percent)));
+ if(loadingFill)loadingFill.style.width=value+'%';
+ if(loadingPercent)loadingPercent.textContent=String(value).padStart(2,'0')+'%';
+ if(loadingTrack)loadingTrack.setAttribute('aria-valuenow',String(value));
+ if(loadingStatus)loadingStatus.textContent=message;
+}
+const nextPaint=()=>new Promise(resolve=>requestAnimationFrame(()=>resolve()));
+setLoadingProgress(7,'Loading game engine and visual assets…');
+await nextPaint();
+
 // Temporary player cast: the engine's tin-can Robot Waiter. Replace this
 // import when the final Sam sculpt is ready; gameplay is decoupled from the cast.
 const host = document.querySelector('#game');
 const stage = await createStage(host, {
-  sky: paintSky(domeU),
+  sky: paintSky(domeU,{width:1024}),
   lights: LIGHTS,
   shadows: true,
-  shadowSize: 2048,
+  shadowSize: 1024,
+  pixelRatio: 1.5,
   fixtures: 8,
-  room: paintRoom(),
+  room: paintRoom(512),
   ui: [document.querySelector('#overlay')],
   label: 'ram-stealin-sam',
 });
 const { scene } = stage;
+setLoadingProgress(24,'Starting the 3D renderer…');
+await nextPaint();
+let mapRoot = new GFX.Group();
+scene.add(mapRoot);
+let mapBounds = { minX: -40, maxX: 40, minZ: -40, maxZ: 40 };
+let mapObstacles = [];
+let mapRadar = { horizontal: [-14, 0, 14, 28], vertical: [-28, 0, 28] };
 const streetLampFixtures = stage.fixtureLights;
 const streetLampSockets = [];
 let streetLightingRefresh = 0;
@@ -71,22 +97,32 @@ const ui = {
   radar: document.querySelector('#radar'),
   level: document.querySelector('#level-label'),
   levelName: document.querySelector('#level-name'),
+  mapLabel: document.querySelector('#map-label'),
 };
 const LEVELS = [
-  { name: 'HILLSIDE HOMES', kind: 'HOME', target: 16, threat: 1.0 },
-  { name: 'MAIN STREET HEAT', kind: 'BUSINESS', target: 24, threat: 1.25 },
-  { name: 'FULL BLOCK TAKEOVER', kind: 'ALL', target: 36, threat: 1.55 },
+  { name: 'HILLSIDE NEIGHBOURHOOD', kind: 'ALL', target: 16, threat: 1.0, map: 'neighbourhood' },
+  { name: 'THE HOUSE IS HOME', kind: 'HOUSE', target: 20, threat: 1.25, map: 'house', crowd: 6 },
+  { name: 'OFFICE TOWER TAKEOVER', kind: 'TOWER', target: 36, threat: 1.5, map: 'tower', crowd: 14 },
+  { name: 'ELECTRONICS STORE RAID', kind: 'STORE', target: 36, threat: 1.6, map: 'store', crowd: 12 },
+  { name: 'RAM FACTORY MELTDOWN', kind: 'FACTORY', target: 36, threat: 1.75, map: 'factory', crowd: 16 },
 ];
 const TOTAL_TARGET_RAM = LEVELS.reduce((sum, level) => sum + level.target, 0);
-const GETAWAY = { x: 0, z: 30.7 };
+const TOTAL_LEVELS = LEVELS.length;
+let GETAWAY = { x: 0, z: 30.7 };
+let START = { x: -3.5, z: 32 };
+let activeMap = 'neighbourhood';
+const TOTAL_PROPERTIES = 42;
 let started = false;
+let paused = false;
+let holding = false;
 let won = false;
 let toastTimer = 0;
 let attackQueued = false;
 let jumpQueued = false;
 let raidQueued = false;
 let primaryPointer = null;
-let suppressNextClick = false;
+let pointerClickHandledAt = -Infinity;
+let ignoreClickUntil = 0;
 let raidTarget = null;
 let attackTarget = null;
 
@@ -104,11 +140,13 @@ function tone(freq, length = 0.11, gain = 0.12) {
 }
 
 const keys = new Set();
+function setPause(v){ if(!started||won||holding)return; paused=v; const el=document.querySelector('#pause-screen'); if(el)el.hidden=!paused; }
 addEventListener('keydown', (event) => {
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
   wakeAudio();
   if (event.repeat) return;
   if (event.target instanceof HTMLButtonElement && event.code === 'Space') return;
+  if (event.code === 'KeyP' || event.code === 'Escape') { setPause(!paused); return; }
   keys.add(event.code);
   if (started && !won && event.code === 'Space') jumpQueued = true;
   if (started && !won && event.code === 'KeyF') { attackTarget=null;attackQueued=true; }
@@ -119,7 +157,7 @@ addEventListener('keydown', (event) => {
   }
 });
 addEventListener('keyup', (event) => keys.delete(event.code));
-addEventListener('blur', () => keys.clear());
+addEventListener('blur', () => { keys.clear(); if(started&&!won&&!holding)setPause(true); });
 addEventListener('pointerdown', wakeAudio, { once: true });
 document.querySelector('#start-button').addEventListener('click', () => {
   started = true;
@@ -149,6 +187,12 @@ document.querySelector('#raid-button').addEventListener('pointerdown', (event) =
   if(!started||won)return;
   raidQueued=true;wakeAudio();
 });
+document.querySelector('#next-button').addEventListener('click', () => {
+  document.querySelector('#clear-screen').hidden = true;
+  holding = false;
+  advanceLevel();
+});
+document.querySelector('#resume-button').addEventListener('click', () => setPause(false));
 document.querySelector('#play-again').addEventListener('click', () => location.reload());
 
 function projectedDistance(worldX,worldY,worldZ,screenX,screenY){
@@ -162,38 +206,59 @@ function projectedDistance(worldX,worldY,worldZ,screenX,screenY){
 function handlePrimaryClick(screenX,screenY){
  if(!started||won)return;
  let selected=null,best=Infinity;
+ // Select a computer/terminal by its visible screen; exterior property doors
+ // remain selectable by their door or facade point.
  for(const property of properties){
   if(property.raided||!activeProperty(property))continue;
   const distance=Math.hypot(player.x-property.doorX,player.z-property.doorZ);
   if(distance>3.8)continue;
+  const displayDistance=projectedDistance(property.screenX??property.doorX,property.screenY??1.15,property.screenZ??property.doorZ,screenX,screenY);
   const doorDistance=projectedDistance(property.doorX,0.95,property.doorZ,screenX,screenY);
   const facadeDistance=projectedDistance(property.x,1.2,property.z,screenX,screenY);
-  const screenDistance=Math.min(doorDistance,facadeDistance);
-  if(screenDistance<86&&screenDistance<best){selected={kind:'raid',property};best=screenDistance;}
+  const screenDistance=Math.min(displayDistance,doorDistance,facadeDistance);
+  if(screenDistance<104&&screenDistance<best){selected={kind:'raid',property};best=screenDistance;}
  }
+ // Enemy selection uses both projected screen position and world reach, so
+ // crowds remain clickable without stealing clicks intended for a computer.
  for(const person of townsfolk){
   if(person.hp<=0)continue;
-  if(Math.hypot(player.x-person.x,player.z-person.z)>2.6)continue;
-  const screenDistance=projectedDistance(person.x,1.05,person.z,screenX,screenY);
-  if(screenDistance<58&&screenDistance<best){selected={kind:'attack',person};best=screenDistance;}
+  const distance=Math.hypot(player.x-person.x,player.z-person.z);
+  if(distance>2.8)continue;
+  const screenDistance=Math.min(
+   projectedDistance(person.x,1.05,person.z,screenX,screenY),
+   projectedDistance(person.x,1.65,person.z,screenX,screenY),
+  );
+  if(screenDistance<94&&screenDistance<best){selected={kind:'attack',person};best=screenDistance;}
+ }
+ if(!selected){
+  let nearest=null,distance=2.85;
+  for(const person of townsfolk){
+   if(person.hp<=0)continue;
+   const d=Math.hypot(player.x-person.x,player.z-person.z);
+   if(d<distance){nearest=person;distance=d;}
+  }
+  if(nearest)selected={kind:'attack',person:nearest};
  }
  if(!selected){
   const property=nearestProperty();
   if(property)selected={kind:'raid',property};
  }
- if(!selected){showToast('GET CLOSER — CLICK A FRONT DOOR OR TOWNSPERSON');return;}
- if(selected.kind==='raid'){raidTarget=selected.property;raidQueued=true;}
- else{
+ if(!selected){showToast('GET CLOSER — CLICK A COMPUTER, FRONT DOOR OR TOWNSPERSON');return;}
+ if(selected.kind==='raid'){
+  raidTarget=selected.property;raidQueued=true;
+ }else{
   attackTarget=selected.person;
   player.yaw=Math.atan2(selected.person.x-player.x,selected.person.z-player.z);
   attackQueued=true;
  }
  wakeAudio();
 }
+// createInput prevents the default pointerdown; some browsers then omit the
+// synthetic click event. Handle intentional clicks on pointerup instead,
+// while allowing the engine's pointer listeners to continue handling drags.
 host.addEventListener('pointerdown',(event)=>{
- if(event.pointerType!=='mouse'||event.button!==0)return;
- primaryPointer={id:event.pointerId,x:event.clientX,y:event.clientY,dragged:false};
- suppressNextClick=false;
+ if(event.button!==0)return;
+ primaryPointer={id:event.pointerId,x:event.clientX,y:event.clientY,dragged:false,startedAt:performance.now(),pointerType:event.pointerType};
 },{capture:true});
 host.addEventListener('pointermove',(event)=>{
  if(!primaryPointer||primaryPointer.id!==event.pointerId)return;
@@ -201,18 +266,37 @@ host.addEventListener('pointermove',(event)=>{
 },{capture:true});
 host.addEventListener('pointerup',(event)=>{
  if(!primaryPointer||primaryPointer.id!==event.pointerId)return;
- suppressNextClick=primaryPointer.dragged;
+ const pointer=primaryPointer;
+ const now=performance.now();
+ const clicked=!pointer.dragged&&now-pointer.startedAt<650
+  &&Math.hypot(event.clientX-pointer.x,event.clientY-pointer.y)<9;
  primaryPointer=null;
+ if(clicked){
+  pointerClickHandledAt=now;
+  handlePrimaryClick(event.clientX,event.clientY);
+ }else if(pointer.dragged){
+  ignoreClickUntil=now+700;
+ }
 },{capture:true});
 host.addEventListener('pointercancel',(event)=>{
- if(primaryPointer?.id===event.pointerId){suppressNextClick=true;primaryPointer=null;}
+ if(primaryPointer?.id===event.pointerId){
+  primaryPointer=null;
+  ignoreClickUntil=performance.now()+700;
+ }
 },{capture:true});
+// Keep the native click path as a fallback. Pointerup handles browsers where
+// createInput suppresses click; this listener covers touch/pen/browser cases
+// where only click is delivered. Time-window deduplication prevents double raids.
 host.addEventListener('click',(event)=>{
  if(event.button!==0)return;
- if(suppressNextClick){suppressNextClick=false;return;}
+ const now=performance.now();
+ if(now<ignoreClickUntil){ignoreClickUntil=0;return;}
+ if(now-pointerClickHandledAt<700){pointerClickHandledAt=-Infinity;return;}
  handlePrimaryClick(event.clientX,event.clientY);
 });
 
+setLoadingProgress(30,'Preparing materials and scene geometry…');
+await nextPaint();
 const mats = {
   ground: new GFX.MeshStandardMaterial({ color: '#263b3a', roughness: 0.94 }),
   concrete: new GFX.MeshStandardMaterial({ color: '#46545a', roughness: 0.82 }),
@@ -229,21 +313,21 @@ function addBox(x, y, z, w, h, d, material, shadow = true) {
   mesh.position.set(x, y, z);
   mesh.castShadow = shadow;
   mesh.receiveShadow = true;
-  scene.add(mesh);
+  mapRoot.add(mesh);
   return mesh;
 }
 function addCylinder(x, y, z, radius, height, material, segments = 24) {
   const mesh = new GFX.Mesh(new GFX.CylinderGeometry(radius, radius, height, segments), material);
   mesh.position.set(x, y, z);
   mesh.castShadow = true;
-  scene.add(mesh);
+  mapRoot.add(mesh);
   return mesh;
 }
 function addRing(x, z, radius, material) {
   const mesh = new GFX.Mesh(new GFX.TorusGeometry(radius - 0.06, 0.06, 8, 48), material);
   mesh.rotation.x = -Math.PI / 2;
   mesh.position.set(x, 0.025, z);
-  scene.add(mesh);
+  mapRoot.add(mesh);
   return mesh;
 }
 
@@ -269,7 +353,7 @@ function townSurface(name,width,depth,tint){
  townSurfaceCache.set(key,material);
  return material;
 }
-const groundMat=townSurface('lawn',84,84,'#e0e7d0');
+const groundMat=townSurface('lawn',200,200,'#b9c4a6');
 const streetMat=townSurface('road',78,6.2);
 const streetVerticalMat=townSurface('road',6.2,78);
 const walkMat=townSurface('sidewalk',78,1.25);
@@ -278,14 +362,14 @@ const driveMat=townSurface('forecourt',16,8.5);
 function addSurface(w,d,x,z,material,y=0.02) {
   const mesh = new GFX.Mesh(new GFX.PlaneGeometry(w,d), material);
   mesh.rotation.x = -Math.PI/2;
-  mesh.position.set(x,y,z); mesh.receiveShadow = true; scene.add(mesh);
+  mesh.position.set(x,y,z); mesh.receiveShadow = true; mapRoot.add(mesh);
 }
 function addLamp(x,z,yaw=0) {
   // The pole, arm and sodium cobra-head are the engine's sculpted streetlamp.
   const mesh = createStatic(GFX, streetlampDefinition);
   mesh.position.set(x,0,z);
   mesh.rotation.y = yaw;
-  scene.add(mesh);
+  mapRoot.add(mesh);
 
   // Store the engine asset's real light sockets. The renderer supports
   // eight point lights, so the stage reuses that pool for nearby lamps.
@@ -321,11 +405,18 @@ function updateStreetLighting(dt) {
     light.visible=true;
   }
 }
+function addEngineScenery(definition,x,z,yaw=0,scale=1){
+ const model=createStatic(GFX,{...definition,bones:[]});
+ model.position.set(x,0,z);model.rotation.y=yaw;model.scale.setScalar(scale);
+ mapRoot.add(model);return model;
+}
 function addRoadStripe(x,z,w,d,material=mats.roadWhite) {
   addBox(x,0.058,z,w,0.018,d,material,false);
 }
-const ground = new GFX.Mesh(new GFX.PlaneGeometry(84,84),groundMat);
-ground.rotation.x=-Math.PI/2; ground.receiveShadow=true; scene.add(ground);
+setLoadingProgress(39,'Building streets, lighting and neighbourhood scenery…');
+await nextPaint();
+const ground = new GFX.Mesh(new GFX.PlaneGeometry(200,200),groundMat);
+ground.rotation.x=-Math.PI/2; ground.receiveShadow=true; mapRoot.add(ground);
 const horizontalRoads=[-14,0,14,28], verticalRoads=[-28,0,28];
 for(const z of horizontalRoads){
   addSurface(78,6.2,0,z,streetMat,0.018);
@@ -346,11 +437,17 @@ for(const x of verticalRoads)for(const z of horizontalRoads){
   }
   addLamp(x-4.3,z-4.2,0);addLamp(x+4.3,z+4.2,Math.PI);
 }
-for(const z of [-21,-7,7,21])for(const x of [-24,-16,-8,8,16,24]){
+for(const z of [-21,-7,7,21])for(const x of [-20,-13.5,-7,7,13.5,20]){
   addSurface(5.6,5.3,x,z,townSurface('lawn',5.6,5.3,'#dbe5c7'),0.012);
 }
-addSurface(16,8.5,0,34,driveMat,0.025);
-for(let x=-5.5;x<=5.5;x+=2.75)addRoadStripe(x,33.8,0.075,4.4);
+// Sculpted Madness Engine foliage and street furniture break up the repeated lots.
+for(const [x,z,yaw] of [[-35,-34,0],[35,-34,Math.PI],[-35,17,0],[35,17,Math.PI],[-12,34,0],[12,34,Math.PI]]){
+ addEngineScenery(engineTree,x,z,yaw,1.25);
+}
+for(const [x,z,yaw] of [[-34,-25,Math.PI/2],[34,-25,-Math.PI/2],[-34,25,Math.PI/2],[34,25,-Math.PI/2]]){
+ addEngineScenery(engineBench,x,z,yaw,1.15);
+}
+addSurface(16,8.5,0,34.5,driveMat,0.04);
 
 const buildingLibrary=createBuildings();
 const buildingMaterials=new Map();
@@ -375,20 +472,22 @@ function buildingMaterial(name){
    plaster:'stucco',stone:'stone',trim:'timber',rubble:'cliff',
    wood:'timber',metal:'hull',cloth:'canvas',bark:'timber',
    thatch:'canvas',hedge:'hedge',timber:'timber',rock:'stone',
-   siding:'clapboard',brick:'brick',
+   siding:'clapboard',brick:'brick',leafA:'hedge',leafB:'hedge',needle:'hedge',leaves:'hedge',
   };
   material=wallMaterial(GFX,textureByPart[name]||'stone');
  }
  buildingMaterials.set(name,material);
  return material;
 }
+setLoadingProgress(51,'Generating the neighbourhood buildings…');
+await nextPaint();
 const BUILDING_SCALE=1.8, cityBatch=new Batch(), parkBatch=new Batch();
 parkBatch.stamp(buildingLibrary.modelFor('park',{variant:3}).parts,0,0,-35,0,2);
 for(const [name,acc] of parkBatch.accs){
   const mesh=new GFX.Mesh(acc.geometry(GFX),buildingMaterial(name));
-  mesh.castShadow=true;mesh.receiveShadow=true;scene.add(mesh);
+  mesh.castShadow=true;mesh.receiveShadow=true;mapRoot.add(mesh);
 }
-const properties=[];
+let properties=[];
 const rows=[
  {z:-21,yaw:0,kind:'HOME',entries:[
   ['bungalow','Luna Bungalow',4],['ranchhouse','Casa Sol',4],['beachhouse','Pacific View',4],
@@ -403,18 +502,30 @@ const rows=[
   ['ranchhouse','Juniper House',4],['bungalow','Cypress Cottage',4],['beachhouse','The Blue Door',4],
   ['dingbat','Marina Flats',5],['aptblock','Palm Terrace',5],['ranchhouse','Mission House',4]]},
 ];
-const lotXs=[-24,-16,-8,8,16,24];let propertyIndex=0;
-for(const row of rows)row.entries.forEach(([type,label,loot],i)=>{
+const lotXs=[-20,-13.5,-7,7,13.5,20];let propertyIndex=0;
+for(const row of rows){
+ for(let i=0;i<row.entries.length;i++){
+  if(propertyIndex>0&&propertyIndex%6===0){
+   const progress=51+Math.floor(propertyIndex/24*12);
+   setLoadingProgress(progress,'Generating neighbourhood buildings ('+propertyIndex+'/24)…');
+   await nextPaint();
+  }
+  const [type,label,loot]=row.entries[i];
   const x=lotXs[i],z=row.z,yaw=row.yaw;
   cityBatch.stamp(buildingLibrary.modelFor(type,{level:type==='aptblock'?3:2,variant:propertyIndex%8}).parts,x,0,z,yaw,BUILDING_SCALE);
   const fp=FOOTPRINTS[type]??[2,2],halfW=fp[0]*0.5*BUILDING_SCALE,halfD=fp[1]*0.5*BUILDING_SCALE;
+  // Keep the raid point and every spawned DIMM beyond the actual building footprint.
+  // The old 0.38-depth offset placed loot inside larger building meshes.
   const front=fp[1]*0.38*BUILDING_SCALE+0.78,fx=Math.sin(yaw),fz=Math.cos(yaw);
   properties.push({id:propertyIndex++,type,label,kind:row.kind,baseLoot:loot,loot,x,z,yaw,halfW,halfD,
     doorX:x+fx*front,doorZ:z+fz*front,raided:false});
-});
+ }
+}
+setLoadingProgress(66,'Finishing the neighbourhood mesh…');
+await nextPaint();
 for(const [name,acc] of cityBatch.accs){
   const mesh=new GFX.Mesh(acc.geometry(GFX),buildingMaterial(name));
-  mesh.castShadow=true;mesh.receiveShadow=true;scene.add(mesh);
+  mesh.castShadow=true;mesh.receiveShadow=true;mapRoot.add(mesh);
 }
 function surfaceAt(){return 0.04;}
 function insideBuilding(x,z,b,margin=0){
@@ -424,9 +535,9 @@ function insideBuilding(x,z,b,margin=0){
   return Math.abs(lx)<b.halfW-margin&&Math.abs(lz)<b.halfD-margin;
 }
 function canMoveTo(x,z){
-  if(x< -40||x>40||z< -40||z>40)return false;
+  if(x<mapBounds.minX||x>mapBounds.maxX||z<mapBounds.minZ||z>mapBounds.maxZ)return false;
   for(const b of properties)if(insideBuilding(x,z,b,-0.06))return false;
-  if(Math.abs(x)<1.55&&z>32&&z<36.7)return false;
+  for(const obstacle of mapObstacles)if(insideBuilding(x,z,obstacle,-0.03))return false;
   return true;
 }
 
@@ -437,6 +548,8 @@ const navDistance=new Int16Array(NAV_COUNT);
 const navQueue=new Int32Array(NAV_COUNT);
 const NAV_DIRECTIONS=[[1,0],[-1,0],[0,1],[0,-1]];
 let navGoal=-1;
+let navigationRefresh=0;
+let hudRefresh=0;
 function navIndex(ix,iz){return iz*NAV_SIZE+ix;}
 function navCell(x,z){
  const ix=Math.max(0,Math.min(NAV_SIZE-1,Math.round((x-NAV_MIN)/NAV_STEP)));
@@ -446,9 +559,14 @@ function navCell(x,z){
 function navPosition(ix,iz){
  return {x:NAV_MIN+ix*NAV_STEP,z:NAV_MIN+iz*NAV_STEP,index:navIndex(ix,iz)};
 }
-for(let iz=0;iz<NAV_SIZE;iz++)for(let ix=0;ix<NAV_SIZE;ix++){
- const p=navPosition(ix,iz);navWalkable[p.index]=canMoveTo(p.x,p.z)?1:0;
+function rebuildWalkability(){
+ navWalkable.fill(0);
+ for(let iz=0;iz<NAV_SIZE;iz++)for(let ix=0;ix<NAV_SIZE;ix++){
+  const p=navPosition(ix,iz);navWalkable[p.index]=canMoveTo(p.x,p.z)?1:0;
+ }
+ navGoal=-1;
 }
+rebuildWalkability();
 function nearestWalkableCell(x,z){
  const origin=navCell(x,z);
  for(let radius=0;radius<=18;radius++){
@@ -519,14 +637,80 @@ function moveTownsperson(person,targetX,targetZ,speed,dt){
  }
  return moved;
 }
-addBox(0,0.65,35,2.8,1.25,4.2,mats.dark);
-addBox(0,1.35,35,2.45,0.32,2.35,mats.dark);
-addBox(0,1.34,33.72,2.08,0.48,0.05,mats.glass,false);
-addBox(0,1.34,36.18,2.08,0.48,0.05,mats.glass,false);
-addBox(0,1.52,34.96,2.15,0.12,0.22,mats.trim,false);
-for(const x of [-1.34,1.34])for(const z of [33.75,36.2]){
-  const wheel=new GFX.Mesh(new GFX.CylinderGeometry(0.35,0.35,0.2,16),mats.dark);
-  wheel.rotation.z=Math.PI/2;wheel.position.set(x,0.36,z);scene.add(wheel);
+// Navigation-grid fallback: keep aggressive NPCs moving even if a map
+// transition leaves their path field disconnected. Steps still obey collision.
+function moveTownspersonDirect(person,dt){
+ const dx=player.x-person.x,dz=player.z-person.z,distance=Math.hypot(dx,dz);
+ if(distance<1.3)return false;
+ const stride=Math.min(distance-1.15,person.speed*dt);
+ if(stride<=0)return false;
+ const inv=1/Math.max(0.001,distance),ux=dx*inv,uz=dz*inv;
+ const candidates=[
+  [ux*stride,uz*stride],[ux*stride,0],[0,uz*stride],
+  [(ux-uz*0.65)*stride,(uz+ux*0.65)*stride],
+  [(ux+uz*0.65)*stride,(uz-ux*0.65)*stride],
+  [0,Math.sign(dz||1)*stride],[Math.sign(dx||1)*stride,0],
+ ];
+ for(const [sx,sz] of candidates){
+  const nx=person.x+sx,nz=person.z+sz;
+  if(!canMoveTo(nx,nz))continue;
+  if(Math.hypot(player.x-nx,player.z-nz)>=distance-0.015)continue;
+  person.x=nx;person.z=nz;return true;
+ }
+ return false;
+}
+// THE GETAWAY TRUCK: the engine's box truck, wheels and all. Sam can drive it.
+const TRUCK_SCALE=1.8,TRUCK_HOME={x:0,z:36.8,yaw:Math.PI};
+const truckMesh=createStatic(GFX,boxtruck.body);
+for(const m of [].concat(truckMesh.material))if(m.name.endsWith('-paint'))m.color=new GFX.Color('#2f9a5b');
+const truckWheelMesh=createStatic(GFX,truckwheel);
+const truckWheels=mountWheels(GFX,boxtruck,{geometry:truckWheelMesh.geometry,material:truckWheelMesh.material});
+const truckGroup=new GFX.Group();truckGroup.add(truckMesh,truckWheels.group);
+truckGroup.scale.setScalar(TRUCK_SCALE);scene.add(truckGroup);
+const truck={x:TRUCK_HOME.x,z:TRUCK_HOME.z,yaw:TRUCK_HOME.yaw,speed:0,driving:false,halfL:2.35,halfW:1.0};
+const truckPoints=(x,z,yaw)=>{
+ const fx=Math.sin(yaw),fz=Math.cos(yaw),sx=Math.cos(yaw),sz=-Math.sin(yaw),out=[];
+ for(const a of [-1,-0.34,0.34,1])for(const b of [-1,0,1])out.push([x+fx*truck.halfL*a+sx*truck.halfW*b,z+fz*truck.halfL*a+sz*truck.halfW*b]);
+ return out;
+};
+function truckFits(x,z,yaw){return truckPoints(x,z,yaw).every(([px,pz])=>canMoveTo(px,pz));}
+function insideTruck(x,z,margin=0.25){
+ const dx=x-truck.x,dz=z-truck.z,fx=Math.sin(truck.yaw),fz=Math.cos(truck.yaw);
+ return Math.abs(dx*fx+dz*fz)<truck.halfL+margin&&Math.abs(dx*fz-dz*fx)<truck.halfW+margin;
+}
+function placeTruck(){
+ truckGroup.visible=activeMap==='neighbourhood';
+ truckGroup.position.set(truck.x,0.02,truck.z);truckGroup.rotation.y=truck.yaw;
+}
+function resetTruck(){
+ Object.assign(truck,{x:TRUCK_HOME.x,z:TRUCK_HOME.z,yaw:TRUCK_HOME.yaw,speed:0,driving:false});
+ sam.group.visible=true;placeTruck();
+}
+function toggleTruck(){
+ if(activeMap!=='neighbourhood')return false;
+ if(truck.driving){
+  const sx=Math.cos(truck.yaw),sz=-Math.sin(truck.yaw);
+  for(const side of [1,-1])for(const dist of [2.4,3.2]){
+   const x=truck.x+sx*side*dist,z=truck.z+sz*side*dist;
+   if(canMoveTo(x,z)){truck.driving=false;truck.speed=0;player.x=x;player.z=z;sam.group.visible=true;showToast('ON FOOT');return true;}
+  }
+  showToast('NO ROOM TO GET OUT');return true;
+ }
+ if(Math.hypot(player.x-truck.x,player.z-truck.z)>4.4)return false;
+ truck.driving=true;player.x=truck.x;player.z=truck.z;player.y=surfaceAt();sam.group.visible=false;
+ tone(200,0.2,0.12);showToast('DRIVING — WASD, SHIFT BOOST, E TO GET OUT. RUN PEOPLE OVER.');return true;
+}
+function driveTruck(dt,stick,boost){
+ const top=boost?15:11;
+ truck.speed+=(stick.y*top-truck.speed)*Math.min(1,(stick.y?1.8:3)*dt);
+ const steer=-stick.x*1.7*Math.min(1,Math.abs(truck.speed)/4)*Math.sign(truck.speed||1);
+ const yaw=truck.yaw+steer*dt,dist=truck.speed*dt;
+ const x=truck.x+Math.sin(yaw)*dist,z=truck.z+Math.cos(yaw)*dist;
+ let moved=0;
+ if(truckFits(x,z,yaw)){truck.x=x;truck.z=z;truck.yaw=yaw;moved=dist;}
+ else{if(Math.abs(truck.speed)>6){stage.shake=Math.max(stage.shake,0.2);tone(90,0.12,0.14);}truck.speed*=-0.25;}
+ truckWheels.drive(moved/TRUCK_SCALE,steer*dt);
+ player.x=truck.x;player.z=truck.z;placeTruck();
 }
 const deliveryPad=addCylinder(GETAWAY.x,0.07,GETAWAY.z,2.45,0.12,mats.trim,48);
 deliveryPad.material=new GFX.MeshStandardMaterial({color:'#a6ff52',emissive:'#4d9b1c',
@@ -539,10 +723,11 @@ function sparkBurst(x,y,z,count=14,material=mats.ram){
     mesh:()=>new GFX.Mesh(sparkGeometry,material),scale:[0.55,1.2],bounce:0.16});
 }
 // The player's model is deliberately replaceable: this cast member is a stand-in.
-const sam = createModel(GFX, robot, { detail: 0.86 });
+setLoadingProgress(72,'Baking Sam and crowd character models…');
+await nextPaint();
+const sam = createModel(GFX, robot, { detail: 0.78 });
 scene.add(sam.group);
 sam.group.scale.setScalar(0.98);
-const START = { x: -3.5, z: 32 };
 const player={x:START.x,z:START.z,y:surfaceAt(START.x,START.z),vy:0,yaw:Math.PI,
  health:100,ram:0,delivered:0,level:1,levelDelivered:0,levelLootReleased:0,
  score:0,raids:0,kills:0,invulnerable:0,attackCooldown:0,grounded:true,combo:0,comboTimer:0};
@@ -550,14 +735,41 @@ sam.group.position.set(player.x, player.y, player.z);
 
 
 const ramItems=[];
-const ramGeometry=new GFX.BoxGeometry(0.13,0.76,0.22),ramContacts=new GFX.BoxGeometry(0.14,0.08,0.24);
+const ramBoardMaterial=new GFX.MeshStandardMaterial({color:'#17633f',roughness:0.38,metalness:0.42,emissive:'#062c19',emissiveIntensity:0.35});
+const ramChipMaterial=new GFX.MeshStandardMaterial({color:'#111820',roughness:0.3,metalness:0.5});
+const ramGoldMaterial=new GFX.MeshStandardMaterial({color:'#d5a84d',roughness:0.24,metalness:0.88,emissive:'#5b3910',emissiveIntensity:0.14});
+const ramLabelMaterial=new GFX.MeshStandardMaterial({color:'#d5e7d9',roughness:0.6});
+const ramGlowMaterial=new GFX.MeshBasicMaterial({color:'#a6ff52',transparent:true,opacity:0.3,toneMapped:false});
+const ramBoardGeometry=new GFX.BoxGeometry(1.18,0.15,0.105);
+const ramChipGeometry=new GFX.BoxGeometry(0.145,0.17,0.075);
+const ramHeatGeometry=new GFX.BoxGeometry(0.17,0.185,0.085);
+const ramContactGeometry=new GFX.BoxGeometry(0.066,0.035,0.025);
+const ramLabelGeometry=new GFX.BoxGeometry(0.22,0.012,0.07);
+const ramHaloGeometry=new GFX.TorusGeometry(0.62,0.035,8,32);
+function buildRamModule(){
+ const module=new GFX.Group();
+ module.add(new GFX.Mesh(ramBoardGeometry,ramBoardMaterial));
+ for(let i=0;i<6;i++){
+  const x=-0.43+i*0.172;
+  const chip=new GFX.Mesh(ramChipGeometry,i%2?ramChipMaterial:mats.ramDark);
+  chip.position.set(x,0.07,0);module.add(chip);
+  const cap=new GFX.Mesh(ramHeatGeometry,ramGoldMaterial);
+  cap.scale.set(0.72,0.18,0.12);cap.position.set(x,0.105,0.055);module.add(cap);
+  const contact=new GFX.Mesh(ramContactGeometry,ramGoldMaterial);
+  contact.position.set(x,-0.095,0.04);module.add(contact);
+  const reverseContact=new GFX.Mesh(ramContactGeometry,ramGoldMaterial);reverseContact.position.set(x,-0.095,-0.04);module.add(reverseContact);
+ }
+ const label=new GFX.Mesh(ramLabelGeometry,ramLabelMaterial);label.position.set(0,0.085,-0.052);module.add(label);
+ const notch=new GFX.Mesh(new GFX.BoxGeometry(0.12,0.03,0.11),ramChipMaterial);notch.position.set(0,-0.075,0);module.add(notch);
+ const halo=new GFX.Mesh(ramHaloGeometry,ramGlowMaterial);halo.rotation.x=-Math.PI/2;halo.position.y=-0.15;module.add(halo);
+ return module;
+}
 function spawnRam(x,z,amount=1){
  const group=new GFX.Group();
  for(let i=0;i<amount;i++){
-  const stick=new GFX.Mesh(ramGeometry,mats.ram);stick.position.set((i-(amount-1)/2)*0.23,0.06,0);
-  stick.rotation.z=(i-(amount-1)/2)*0.12;
-  const contact=new GFX.Mesh(ramContacts,mats.ramDark);contact.position.set(stick.position.x,-0.34,0);
-  group.add(stick,contact);
+  const module=buildRamModule();
+  module.position.set((i-(amount-1)/2)*1.32,0.04,0);
+  module.rotation.z=(i-(amount-1)/2)*0.045;group.add(module);
  }
  group.position.set(x,surfaceAt(x,z)+0.92,z);scene.add(group);
  ramItems.push({group,x,z,amount,phase:Math.random()*Math.PI*2,active:true});
@@ -572,33 +784,65 @@ function spawnMedkit(x,z){
  medItems.push({x,z,group,phase:Math.random()*Math.PI*2,active:true});
 }
 [[-30,-4],[30,4],[-12,28],[12,-28]].forEach(([x,z])=>spawnMedkit(x,z));
-const citizenCast=[neighbour,vendor,neighbour,critic,cop,vendor,security,neighbour,cop,punk,vendor,security,neighbour,cop];
-const citizenSpots=[[-28,-3],[-28,10],[28,-10],[28,3],[-12,-3],[12,3],[-12,14],[12,-14],[-6,28],[6,-28],[-28,20],[28,-20],[-6,3],[6,-3]];
-const townsfolk=citizenSpots.map(([spawnX,spawnZ],i)=>{
+const citizenCast=[neighbour,vendor,neighbour,critic,cop,vendor,security,neighbour,cop,punk,vendor,security,neighbour,cop,critic,punk,neighbour,security,vendor,cop,neighbour,critic,security,punk];
+const citizenSpots=[
+ [-28,-3],[-28,10],[28,-10],[28,3],[-12,-3],[12,3],[-12,14],[12,-14],[-6,28],[6,-28],[-28,20],[28,-20],[-6,3],[6,-3],
+ [-34,-8],[34,8],[-20,-29],[20,-29],[-34,25],[34,25],[-4,-23],[4,-23],[-22,10],[22,-10],
+];
+const townsfolk=[];
+for(let i=0;i<citizenSpots.length;i++){
+ if(i%4===0){
+  setLoadingProgress(76+Math.floor(i/citizenSpots.length*17),'Baking crowd models ('+i+'/'+citizenSpots.length+')…');
+  await nextPaint();
+ }
+ const [spawnX,spawnZ]=citizenSpots[i];
  const safeSpawn=nearestWalkableCell(spawnX,spawnZ);
  const x=safeSpawn?safeSpawn.x:spawnX,z=safeSpawn?safeSpawn.z:spawnZ;
- const model=createModel(GFX,citizenCast[i%citizenCast.length],{detail:0.72});scene.add(model.group);
+ const model=createModel(GFX,citizenCast[i%citizenCast.length],{detail:0.6});scene.add(model.group);
+ // Crowd shadows are omitted to reduce shadow-map work across the 24 skinned meshes.
+ model.mesh.castShadow=false;
  model.group.scale.setScalar(i%5===4?0.96:0.9);
- const isCop=i%5===4||i===8||i===13,isVendor=i%4===1,hp=isCop?3:2;
- const isSecurity=!isCop&&citizenCast[i%citizenCast.length]===security;
- const baseSpeed=isCop?3:isVendor?2.2:2.55,baseDamage=isCop?16:isSecurity?14:isVendor?10:12;
+ const cast=citizenCast[i%citizenCast.length];
+ const isCop=cast===cop,isSecurity=cast===security,isVendor=cast===vendor;
+ const hp=isCop?4:isSecurity?4:3;
+ const baseSpeed=isCop?3.6:isSecurity?3.3:isVendor?3.0:3.1;
+ const baseDamage=isCop?12:isSecurity?11:isVendor?8:9;
  const person={model,x,z,homeX:x,homeZ:z,hp,maxHp:hp,baseHp:hp,
   kind:isCop?'COP':isSecurity?'SECURITY':isVendor?'VENDOR':'NEIGHBOUR',
   speed:baseSpeed,baseSpeed,damage:baseDamage,baseDamage,
   aggro:false,stun:0,windup:0,attackTimer:0,respawn:0,phase:i*1.31,
   wanderX:x,wanderZ:z,wanderTimer:Math.random()*1.5};
- model.group.position.set(x,surfaceAt(x,z),z);return person;
-});
+ model.group.position.set(x,surfaceAt(x,z),z);
+ townsfolk.push(person);
+}
 function alertTownfolk(property){
+ levelRaids++;
  const candidates=townsfolk.filter(p=>p.hp>0&&!p.aggro)
   .map(person=>({person,distance:Math.hypot(person.x-property.doorX,person.z-property.doorZ)}))
   .sort((a,b)=>a.distance-b.distance);
- candidates.slice(0,player.raids<2?3:6).forEach(({person,distance})=>{if(distance<22)person.aggro=true;});
- if(player.raids>=2)townsfolk.filter(p=>p.kind==='COP').forEach(p=>{p.aggro=true;});
+ const responseCount=Math.min(2+(levelRaids-1)*2,8);
+ candidates.slice(0,responseCount).forEach(({person,distance})=>{if(distance<20)person.aggro=true;});
+ if(levelRaids>=3)townsfolk.filter(p=>p.kind==='COP'||p.kind==='SECURITY').forEach(p=>{if(p.hp>0)p.aggro=true;});
+ // Residents do not dog-pile Sam on level entry. A second alarm in the house
+ // brings the whole household running; larger venues escalate after three raids.
+ if(levelRaids>=(activeMap==='house'?3:5))townsfolk.forEach(p=>{if(p.hp>0)p.aggro=true;});
+}
+const beaconGeometry=new GFX.CylinderGeometry(0.5,0.5,5,20,1,true);
+const beaconMats={HOME:new GFX.MeshBasicMaterial({color:'#ffc46b',transparent:true,opacity:0.28,depthWrite:false}),
+ BUSINESS:new GFX.MeshBasicMaterial({color:'#62d5ff',transparent:true,opacity:0.28,depthWrite:false})};
+beaconMats.computer=new GFX.MeshBasicMaterial({color:'#a6ff52',transparent:true,opacity:0.28,depthWrite:false});
+function addBeacons(){
+ for(const p of properties){
+  p.beacon=new GFX.Mesh(beaconGeometry,beaconMats[p.kind]||beaconMats.computer);
+  p.beacon.position.set(p.doorX,2.5,p.doorZ);mapRoot.add(p.beacon);
+ }
 }
 let elapsed=0,swingTime=0,raidPrompt=null;
+let levelRaids=0;
 stage.target.set(player.x,player.y+1.2,player.z);stage.view.zoomBy(1.12);
+addBeacons();placeTruck();
 function activeProperty(property){
+ if(property.beacon)property.beacon.visible=!property.raided;
  const kind=LEVELS[player.level-1].kind;
  return kind==='ALL'||property.kind===kind;
 }
@@ -622,10 +866,10 @@ function drawRadar(){
  if(!radarCtx)return;
  const c=radarCtx,w=c.canvas.width,h=c.canvas.height;c.clearRect(0,0,w,h);
  c.fillStyle='#101a20';c.fillRect(0,0,w,h);
- const px=x=>(x+42)*w/84,pz=z=>(z+42)*h/84;
+ const px=x=>(x-mapBounds.minX)*w/(mapBounds.maxX-mapBounds.minX),pz=z=>(z-mapBounds.minZ)*h/(mapBounds.maxZ-mapBounds.minZ);
  c.strokeStyle='#3a4b50';c.lineWidth=6;
- for(const z of horizontalRoads){c.beginPath();c.moveTo(px(-39),pz(z));c.lineTo(px(39),pz(z));c.stroke();}
- for(const x of verticalRoads){c.beginPath();c.moveTo(px(x),pz(-39));c.lineTo(px(x),pz(39));c.stroke();}
+ for(const z of mapRadar.horizontal){c.beginPath();c.moveTo(px(mapBounds.minX),pz(z));c.lineTo(px(mapBounds.maxX),pz(z));c.stroke();}
+ for(const x of mapRadar.vertical){c.beginPath();c.moveTo(px(x),pz(mapBounds.minZ));c.lineTo(px(x),pz(mapBounds.maxZ));c.stroke();}
  for(const p of properties){
   c.fillStyle=p.raided?'#5b6465':!activeProperty(p)?'#354346':p.kind==='HOME'?'#e0b879':'#62c5d1';
   c.fillRect(px(p.x)-3,pz(p.z)-3,6,6);
@@ -641,61 +885,79 @@ function updateHud(){
  const level=LEVELS[player.level-1];
  ui.ram.textContent=String(player.ram).padStart(2,'0');
  ui.delivered.textContent=String(player.delivered).padStart(2,'0')+' / '+TOTAL_TARGET_RAM;
- ui.level.textContent='0'+player.level+' / 03';
+ ui.level.textContent='0'+player.level+' / 0'+TOTAL_LEVELS;
  ui.levelName.textContent='LEVEL 0'+player.level+' / '+level.name;
  ui.health.style.width=Math.max(0,player.health)+'%';
  ui.health.style.background=player.health<35?'#ff655c':'#a6ff52';
  ui.score.textContent=String(player.score).padStart(5,'0');
- ui.raids.textContent=player.raids+' / '+properties.length;
+ ui.raids.textContent=player.raids+' / '+TOTAL_PROPERTIES;
+ if(ui.mapLabel)ui.mapLabel.textContent=({neighbourhood:'NEIGHBOURHOOD MAP',house:'HOUSE FLOORPLAN',tower:'TOWER FLOORPLAN',store:'ELECTRONICS STORE',factory:'RAM FACTORY FLOORPLAN'})[level.map];
  raidPrompt=nearestProperty();
  if(raidPrompt){
-  ui.objective.textContent='LEFT CLICK / E TO RAID: '+raidPrompt.label.toUpperCase();
-  ui.status.textContent=raidPrompt.kind==='HOME'
-   ?'Residence stash: '+raidPrompt.loot+' RAM • neighbours will respond.'
-   :'Business stash: '+raidPrompt.loot+' RAM • alarms draw a stronger response.';
+  const indoor=['HOUSE','TOWER','STORE','FACTORY'].includes(level.kind);
+  ui.objective.textContent='E / CLICK TO '+(indoor?'HACK: ':'RAID: ')+raidPrompt.label.toUpperCase();
+  ui.status.textContent=raidPrompt.kind==='HOME'||raidPrompt.kind==='HOUSE'
+   ?'Computer stash: '+raidPrompt.loot+' RAM • the residents are closing in.'
+   :raidPrompt.kind==='TOWER'
+    ?'Office computer: '+raidPrompt.loot+' RAM • employees and security are converging.'
+    :raidPrompt.kind==='STORE'
+     ?'Display computer: '+raidPrompt.loot+' RAM • shop staff are converging.'
+     :raidPrompt.kind==='FACTORY'
+      ?'Production terminal: '+raidPrompt.loot+' RAM • factory workers are swarming.'
+      :'Business stash: '+raidPrompt.loot+' RAM • alarms draw a stronger response.';
  }else if(levelRamRemaining()<=0){
-  ui.objective.textContent='COLLECT THE LOOSE RAM AND RETURN TO THE VAN';
+  ui.objective.textContent=activeMap==='neighbourhood'?'COLLECT THE LOOSE RAM AND RETURN TO THE TRUCK PAD':'COLLECT THE LOOSE RAM AND RETURN TO THE EXIT';
   ui.status.textContent='Level '+player.level+' stash: '+(player.levelDelivered+player.ram)+' / '+level.target+' RAM.';
  }else if(player.ram>0){
-  ui.objective.textContent='RETURN TO THE VAN AND FENCE THE STASH';
+  ui.objective.textContent=activeMap==='neighbourhood'?'GET TO THE GREEN PAD AND FENCE THE STASH (DRIVE THERE: E)':'GET TO THE EXIT PAD AND FENCE THE STASH';
   ui.status.textContent='Level '+player.level+' stash: '+(player.levelDelivered+player.ram)+' / '+level.target+' RAM.';
  }else{
   ui.objective.textContent='CLEAR '+level.name+': FENCE '+level.target+' RAM';
-  ui.status.textContent='Find a highlighted home or business. Left-click its entrance to raid it.';
+  ui.status.textContent=level.kind==='HOUSE'?'Search the house for desktop computers. Hack both before the residents overwhelm you.':level.kind==='TOWER'?'Search the office floor for six computers while staff and security swarm you.':level.kind==='STORE'?'Search the electronics store display stations. Each computer holds part of the RAM stash.':level.kind==='FACTORY'?'Find the four production terminals. Hack the RAM press controls and escape the factory floor.':'Find a highlighted home or business. Approach its entrance and press E or click to raid it.';
  }
  drawRadar();
 }
 updateHud();
 function raidProperty(target=null){
- const property=target||nearestProperty();
- if(!property||property.raided||!activeProperty(property)||Math.hypot(player.x-property.doorX,player.z-property.doorZ)>3.8){showToast('GET CLOSER TO AN UNRAIDED FRONT DOOR');return;}
+ const property=truck.driving?null:(target||nearestProperty());
+ if(!property&&!target&&toggleTruck())return;
+ if(!property||property.raided||!activeProperty(property)||Math.hypot(player.x-property.doorX,player.z-property.doorZ)>3.8){showToast('GET CLOSER TO THE COMPUTER OR RAID TARGET');return;}
  const level=LEVELS[player.level-1];
  const remaining=levelRamRemaining();
  const stash=Math.min(property.loot,remaining);
- if(stash<=0){showToast('ALL LEVEL RAM FOUND — RETURN TO THE VAN');return;}
+ if(stash<=0){showToast(activeMap==='neighbourhood'?'ALL LEVEL RAM FOUND — RETURN TO THE TRUCK PAD':'ALL LEVEL RAM FOUND — RETURN TO THE EXIT PAD');return;}
  property.raided=true;player.raids++;player.score+=stash*45;player.levelLootReleased+=stash;
- const sideX=Math.cos(property.yaw),sideZ=-Math.sin(property.yaw);
- const facingX=Math.sin(property.yaw),facingZ=Math.cos(property.yaw);
- for(let i=0;i<stash;i++){
-  const lane=(i%3)-1,row=Math.floor(i/3),outward=(row%2)*0.42;
-  spawnRam(
-   property.doorX+sideX*lane*0.56+facingX*outward,
-   property.doorZ+sideZ*lane*0.56+facingZ*outward,
-   1
-  );
+ if(activeMap==='neighbourhood'){
+  // Exterior house/shop raids credit the stash immediately. This avoids
+  // losing first-level loot to a ground-pickup placement/collection failure.
+  player.ram+=stash;
+  player.score+=stash*25;
+ }else{
+  // Interior computer and production raids retain their physical DIMM drops.
+  const sideX=Math.cos(property.yaw),sideZ=-Math.sin(property.yaw);
+  const facingX=Math.sin(property.yaw),facingZ=Math.cos(property.yaw);
+  for(let i=0;i<stash;i++){
+   const lane=(i%3)-1,row=Math.floor(i/3),outward=(row%2)*0.42;
+   spawnRam(
+    property.doorX+sideX*lane*0.56+facingX*outward,
+    property.doorZ+sideZ*lane*0.56+facingZ*outward,
+    1
+   );
+  }
  }
  effects.ring(property.doorX,0,property.doorZ,{colour:'#a6ff52',reach:2.8,life:0.55});
  sparkBurst(property.doorX,0.6,property.doorZ,22);alertTownfolk(property);
- showToast(property.kind+' RAIDED: '+property.label.toUpperCase()+'  +'+stash+' RAM');
+ showToast((property.type==='computer'?'COMPUTER HACKED: ':property.type==='factory-terminal'?'PRODUCTION TERMINAL HACKED: ':property.kind+' RAIDED: ')+property.label.toUpperCase()+'  +'+stash+' RAM');
  tone(560,0.18,0.2);updateHud();
 }
 
 function attack(target=null){
+ if(truck.driving){tone(330,0.12,0.1);showToast('HONK');return;}
  if(player.attackCooldown>0||!started||won)return;
  player.combo=player.comboTimer>0?(player.combo%3)+1:1;player.comboTimer=1;
  player.attackCooldown=player.combo===3?0.62:0.38;swingTime=0.58;
  tone(205+player.combo*42,0.1,0.16);
- const fx=Math.sin(player.yaw),fz=Math.cos(player.yaw),reach=player.combo===3?3.1:2.55;
+ const fx=Math.sin(player.yaw),fz=Math.cos(player.yaw),reach=player.combo===3?3.45:2.85;
  let hits=0;
  for(const person of townsfolk){
   if(person.hp<=0||(target&&person!==target))continue;
@@ -708,17 +970,20 @@ function attack(target=null){
   effects.ring(person.x,0,person.z,{colour:player.combo===3?'#a6ff52':'#ffbd65',reach:1.2,life:0.26});
   sparkBurst(person.x,0.78,person.z,8);hits++;
   if(person.hp<=0){
-   person.model.group.visible=false;person.respawn=14;player.kills++;player.score+=person.kind==='COP'?320:240;
-   showToast(person.kind+' KNOCKED OUT  +SCORE');tone(520,0.17,0.2);
+   knockOut(person,'KNOCKED OUT');
   }else showToast(player.combo===3?'HARD HIT — THEY STAGGER':'HIT — KEEP PRESSING');
  }
  if(!hits)showToast('NO ONE IN REACH — GET CLOSER');
  else{effects.ring(player.x,player.y,player.z,{colour:'#a6ff52',reach:1.9,life:0.3});stage.shake=Math.max(stage.shake,player.combo===3?0.17:0.09);}
  updateHud();
 }
+function knockOut(person,verb){
+ person.model.group.visible=false;person.respawn=18;player.kills++;player.score+=person.kind==='COP'?320:240;
+ showToast(person.kind+' '+verb);tone(520,0.17,0.2);
+}
 function hurtPlayer(person,distance){
  if(player.invulnerable>0)return;
- player.health=Math.max(0,player.health-person.damage);player.invulnerable=0.9;player.combo=0;
+ player.health=Math.max(0,player.health-(truck.driving?Math.ceil(person.damage/2):person.damage));player.invulnerable=0.9;player.combo=0;
  const dx=player.x-person.x,dz=player.z-person.z,d=Math.max(0.01,distance);
  const px=player.x+dx/d*0.62,pz=player.z+dz/d*0.62;
  if(canMoveTo(px,player.z))player.x=px;if(canMoveTo(player.x,pz))player.z=pz;
@@ -726,31 +991,60 @@ function hurtPlayer(person,distance){
  tone(110,0.16,0.18);stage.shake=Math.max(stage.shake,0.18);updateHud();
  if(player.health<=0)respawnPlayer();
 }
+function clearLevelPickups(){
+ for(const item of ramItems){if(item.active){item.active=false;scene.remove(item.group);}}
+ for(const item of medItems){if(item.active){item.active=false;scene.remove(item.group);}}
+}
+function buildNextMap(level){
+ if(mapRoot)scene.remove(mapRoot);
+ mapRoot=new GFX.Group();scene.add(mapRoot);
+ streetLampSockets.length=0;streetLightingRefresh=0;
+ activeMap=level.map;
+ levelRaids=0;
+ const layout=buildInteriorLevel(GFX,mapRoot,level.kind,townSurface);
+ mapBounds=layout.bounds;mapObstacles=layout.obstacles;mapRadar=layout.radar;
+ properties=layout.properties;
+ START={...layout.start};GETAWAY={...layout.exit};
+ addBeacons();
+ for(const light of layout.lights)streetLampSockets.push(light);
+ rebuildWalkability();
+ player.x=START.x;player.z=START.z;player.y=surfaceAt(START.x,START.z);
+ player.vy=0;player.grounded=true;player.yaw=Math.PI;resetTruck();
+ for(let i=0;i<townsfolk.length;i++){
+  const person=townsfolk[i],spawn=layout.spawnPoints[i%layout.spawnPoints.length];
+  const safe=nearestWalkableCell(spawn[0],spawn[1]);
+  const x=safe?safe.x:spawn[0],z=safe?safe.z:spawn[1];
+  person.homeX=x;person.homeZ=z;person.x=x;person.z=z;
+  person.maxHp=Math.ceil(person.baseHp*(1+0.28*(player.level-1)));
+  person.hp=person.maxHp;person.speed=person.baseSpeed*(1+(level.threat-1)*0.5);
+  person.damage=Math.round(person.baseDamage*(1+0.1*(player.level-1)));
+  person.aggro=false;person.stun=0;person.windup=0;person.attackTimer=0;
+  person.respawn=0;person.wanderTimer=0.25+(i%6)*0.12;
+  person.wanderX=x;person.wanderZ=z;person.model.group.visible=true;
+  person.model.group.position.set(x,surfaceAt(x,z),z);
+ }
+ const crowd=level.crowd??townsfolk.length;
+ for(let i=crowd;i<townsfolk.length;i++){const person=townsfolk[i];person.hp=0;person.respawn=Infinity;person.aggro=false;person.model.group.visible=false;}
+ const medSpawns=layout.spawnPoints.filter((_,i)=>i%6===0);
+ for(let i=0;i<medSpawns.length;i++){
+  const safe=nearestWalkableCell(medSpawns[i][0]+(i%2?1.5:-1.5),medSpawns[i][1]-1.3);
+  if(safe)spawnMedkit(safe.x,safe.z);
+ }
+ stage.target.set(player.x,player.y+1.2,player.z);
+ stage.view.reset();
+ // The interior start points keep this camera inside each room, looking across
+ // the visible floor rather than viewing the entrance from outside.
+ stage.view.turn(-Math.PI / 4, 0.52);
+ stage.view.zoomBy(1.2);
+ stage.view.step(0,true);
+ navigationRefresh=0;
+}
 function advanceLevel(){
- player.level++;
- player.levelDelivered=0;
- player.levelLootReleased=0;
- if(player.level===3){
-  for(const property of properties){
-   property.raided=false;
-   property.loot=Math.ceil(property.baseLoot*1.35);
-  }
- }
+ player.level++;player.levelDelivered=0;player.levelLootReleased=0;
  const level=LEVELS[player.level-1];
- for(const person of townsfolk){
-  const enforcement=person.kind==='COP'||person.kind==='SECURITY';
-  person.maxHp=Math.ceil(person.baseHp*(1+0.25*(player.level-1)));
-  person.hp=person.maxHp;
-  person.speed=person.baseSpeed*level.threat;
-  person.damage=Math.round(person.baseDamage*(1+0.18*(player.level-1)));
-  person.aggro=player.level===3||(player.level===2&&enforcement);
-  person.stun=0;person.windup=0;person.attackTimer=0;person.respawn=0;
-  person.x=person.homeX;person.z=person.homeZ;
-  person.model.group.visible=true;person.wanderTimer=0;
- }
- navGoal=-1;
+ clearLevelPickups();buildNextMap(level);
  player.health=Math.min(100,player.health+25);
- player.invulnerable=1.8;
+ player.invulnerable=2.2;player.attackCooldown=0;swingTime=0;navGoal=-1;
  showToast('LEVEL 0'+player.level+' — '+level.name);
  updateHud();
 }
@@ -770,28 +1064,32 @@ function deliverRam(){
  if(player.levelDelivered>=level.target){
   if(player.level===LEVELS.length){
    won=true;
-   ui.winCopy.textContent=player.delivered+' RAM fenced • all three levels cleared • '+player.raids+' property raids • '+player.kills+' townsfolk knockouts • score '+player.score;
+   ui.winCopy.textContent=player.delivered+' RAM fenced • all five maps cleared • '+player.raids+' targets hacked or raided • '+player.kills+' opponents knocked out • score '+player.score;
    ui.win.hidden=false;
-  }else advanceLevel();
+  }else{
+   holding=true;const next=LEVELS[player.level];
+   document.querySelector('#clear-title').textContent='JOB '+player.level+' DONE';
+   document.querySelector('#clear-copy').textContent=level.target+' RAM fenced • score '+player.score+'. Next: '+next.name+'.';
+   document.querySelector('#clear-screen').hidden=false;
+  }
  }
  updateHud();
 }
 function respawnPlayer(){
- const lost=Math.floor(player.ram/2);
- player.ram-=lost;
- for(const item of ramItems){
-  if(item.active){item.active=false;scene.remove(item.group);}
+ // Busted: what Sam carried drops where he fell, and the raids stay done.
+ const dropped=player.ram,spot=nearestWalkableCell(player.x,player.z)||{x:START.x,z:START.z};
+ for(let i=0;i<dropped;i++){
+  const a=i*2.4,r=0.4+0.18*Math.floor(i/5)+(i%5)*0.06,px=spot.x+Math.cos(a)*r,pz=spot.z+Math.sin(a)*r;
+  if(canMoveTo(px,pz))spawnRam(px,pz,1);else spawnRam(spot.x,spot.z,1);
  }
- for(const property of properties){
-  if(activeProperty(property))property.raided=false;
- }
- player.levelLootReleased=player.levelDelivered+player.ram;
+ player.ram=0;resetTruck();
  player.x=START.x;player.z=START.z;player.y=surfaceAt(START.x,START.z);
- player.vy=0;player.grounded=true;player.health=65;player.invulnerable=2;player.combo=0;
+ player.vy=0;player.grounded=true;player.health=70;player.invulnerable=2.5;player.combo=0;
+ player.attackCooldown=0;swingTime=0;navigationRefresh=0;
  jumpQueued=false;attackQueued=false;raidQueued=false;
- raidTarget=null;attackTarget=null;primaryPointer=null;suppressNextClick=false;
+ raidTarget=null;attackTarget=null;primaryPointer=null;
  for(const person of townsfolk){person.windup=0;person.stun=0;person.attackTimer=0;}
- showToast(lost?'GETAWAY RESPAWN — LOST '+lost+' RAM':'GETAWAY RESPAWN — BACK ON THE STREET');
+ showToast(dropped?'BUSTED — DROPPED '+dropped+' RAM WHERE YOU FELL':'BUSTED — BACK AT THE START');
  updateHud();
 }
 
@@ -799,31 +1097,39 @@ stage.run((rawDt)=>{
  const dt=Math.min(rawDt,0.05);elapsed+=dt;input.take();
  updateStreetLighting(dt);
  if(toastTimer>0){toastTimer-=dt;if(toastTimer<=0)ui.toast.classList.remove('show');}
- if(!started||won){
+ if(!started||won||holding||paused){
   effects.update(dt);const look=input.view(dt);
   stage.view.turn(look.turn,look.tilt);stage.view.zoomBy(look.zoom);stage.view.step(dt);return;
  }
- const look=input.view(dt);stage.view.turn(look.turn,look.tilt);stage.view.zoomBy(look.zoom);stage.view.step(dt);
+ const look=input.view(dt);
+ if(keys.has('KeyE'))look.turn-=1.9*dt; // E raids; it must not also turn the camera.
+ stage.view.turn(look.turn,look.tilt);stage.view.zoomBy(look.zoom);stage.view.step(dt);
  player.attackCooldown=Math.max(0,player.attackCooldown-dt);player.invulnerable=Math.max(0,player.invulnerable-dt);
  player.comboTimer=Math.max(0,player.comboTimer-dt);if(player.comboTimer<=0)player.combo=0;
  if(swingTime>0)swingTime=Math.max(0,swingTime-dt);
- const [mx,mz]=toGround(input.stick(),stage.view.yaw),magnitude=Math.min(1,Math.hypot(mx,mz));
+ const pointerStick=input.stick();
+ if(primaryPointer&&!primaryPointer.dragged){pointerStick.x=0;pointerStick.y=0;}
+ const [mx,mz]=truck.driving?[0,0]:toGround(pointerStick,stage.view.yaw),magnitude=Math.min(1,Math.hypot(mx,mz));
  const sprint=keys.has('ShiftLeft')||keys.has('ShiftRight'),speed=sprint?8.8:6;
- if(magnitude>0.08){
+ const parkedTruck=truckGroup.visible&&!truck.driving;
+ if(truck.driving)driveTruck(dt,pointerStick,sprint);else placeTruck();
+ if(!truck.driving&&magnitude>0.08){
   const nx=player.x+mx*speed*dt,nz=player.z+mz*speed*dt;
-  if(canMoveTo(nx,player.z))player.x=nx;if(canMoveTo(player.x,nz))player.z=nz;
+  if(canMoveTo(nx,player.z)&&!(parkedTruck&&insideTruck(nx,player.z)))player.x=nx;
+  if(canMoveTo(player.x,nz)&&!(parkedTruck&&insideTruck(player.x,nz)))player.z=nz;
   player.yaw=Math.atan2(mx,mz);
  }
- player.x=Math.max(-40,Math.min(40,player.x));player.z=Math.max(-40,Math.min(40,player.z));
+ player.x=Math.max(mapBounds.minX,Math.min(mapBounds.maxX,player.x));player.z=Math.max(mapBounds.minZ,Math.min(mapBounds.maxZ,player.z));
  const previousY=player.y;
+ if(truck.driving)jumpQueued=false;
  if(player.grounded&&jumpQueued){player.vy=9.2;player.grounded=false;tone(340,0.08,0.06);}
  jumpQueued=false;player.vy-=23*dt;player.y+=player.vy*dt;
  const support=surfaceAt(player.x,player.z);
  if(player.vy<=0&&previousY>=support-0.06&&player.y<=support){player.y=support;player.vy=0;player.grounded=true;}
  else player.grounded=false;
  if(player.y< -7)respawnPlayer();
- if(raidQueued)raidProperty(raidTarget);raidQueued=false;raidTarget=null;
- if(attackQueued)attack(attackTarget);attackQueued=false;attackTarget=null;
+ if(raidQueued){raidProperty(raidTarget);raidQueued=false;raidTarget=null;}
+ if(attackQueued&&player.attackCooldown<=0){attack(attackTarget);attackQueued=false;attackTarget=null;}
  sam.group.position.set(player.x,player.y,player.z);sam.group.rotation.y=player.yaw;
  sam.group.rotation.z=player.invulnerable>0?Math.sin(elapsed*26)*0.07:0;
  sam.pose({clip:swingTime>0?'attack':magnitude>0.1?'walk':'idle',t:swingTime>0?0.58-swingTime:elapsed,time:elapsed,speed:sprint?1.35:1});
@@ -831,7 +1137,7 @@ stage.run((rawDt)=>{
   if(!item.active)continue;
   item.group.position.y=surfaceAt(item.x,item.z)+0.92+Math.sin(elapsed*2.45+item.phase)*0.12;
   item.group.rotation.y=elapsed*1.25;item.group.rotation.z=Math.sin(elapsed*1.7+item.phase)*0.08;
-  if(Math.hypot(item.x-player.x,item.z-player.z)<1.18&&Math.abs(item.group.position.y-(player.y+0.9))<1.75){
+  if(Math.hypot(item.x-player.x,item.z-player.z)<(truck.driving?2.6:1.18)&&Math.abs(item.group.position.y-(player.y+0.9))<1.75){
    item.active=false;scene.remove(item.group);player.ram+=item.amount;player.score+=item.amount*25;
    effects.ring(item.x,0,item.z,{colour:'#a6ff52',reach:1.65,life:0.34});
    tone(640+player.ram*9,0.08,0.12);showToast('RAM PICKED UP  +'+item.amount);updateHud();
@@ -845,7 +1151,11 @@ stage.run((rawDt)=>{
    effects.ring(item.x,0,item.z,{colour:'#a6ff52',reach:1.8,life:0.4});showToast('FIRST AID  +28 HEALTH');updateHud();
   }
  }
-  if(townsfolk.some(person=>person.aggro&&person.hp>0))rebuildNavigation(player.x,player.z);
+  navigationRefresh-=dt;
+  if(navigationRefresh<=0&&townsfolk.some(person=>person.aggro&&person.hp>0)){
+    navigationRefresh=0.14;
+    rebuildNavigation(player.x,player.z);
+  }
   for(const person of townsfolk){
     if(person.hp<=0){
       person.respawn-=dt;
@@ -857,44 +1167,87 @@ stage.run((rawDt)=>{
     person.stun=Math.max(0,person.stun-dt);
     person.attackTimer=Math.max(0,person.attackTimer-dt);
     const dx=player.x-person.x,dz=player.z-person.z,distance=Math.hypot(dx,dz);
+    if(truck.driving&&Math.abs(truck.speed)>4&&person.stun<=0){
+      const fx=Math.sin(truck.yaw),fz=Math.cos(truck.yaw),rx=person.x-truck.x,rz=person.z-truck.z;
+      const along=rx*fx+rz*fz,across=rx*fz-rz*fx;
+      if(Math.abs(along)<truck.halfL+0.4&&Math.abs(across)<truck.halfW+0.5){
+        person.hp-=2;person.stun=1.2;person.windup=0;person.aggro=true;
+        const dir=Math.sign(truck.speed)||1,sideSign=across>0?1:-1;
+        for(let k2=0;k2<6;k2++){const nx=person.x+fx*dir*0.5+fz*sideSign*0.4,nz=person.z+fz*dir*0.5-fx*sideSign*0.4;if(canMoveTo(nx,nz)){person.x=nx;person.z=nz;}}
+        sparkBurst(person.x,0.8,person.z,10);stage.shake=Math.max(stage.shake,0.25);tone(140,0.14,0.2);
+        if(person.hp<=0){knockOut(person,'FLATTENED');continue;}
+      }
+    }
     const wasWinding=person.windup>0;
     if(wasWinding){
       person.windup=Math.max(0,person.windup-dt);
-      if(person.windup===0&&distance<1.8&&person.stun<=0)hurtPlayer(person,distance);
+      if(person.windup===0&&distance<2.05&&person.stun<=0)hurtPlayer(person,distance);
     }
     let moving=false;
-    if(person.stun<=0&&person.windup<=0&&person.aggro&&distance>1.25){
-      const waypoint=nextNavigationWaypoint(person.x,person.z);
-      if(waypoint){
-        const oldX=person.x,oldZ=person.z;
-        moving=moveTownsperson(person,waypoint.x,waypoint.z,person.speed,dt);
-        if(moving)person.model.group.rotation.y=Math.atan2(person.x-oldX,person.z-oldZ);
+    if(person.stun<=0&&person.windup<=0){
+      const oldX=person.x,oldZ=person.z;
+      if(person.aggro&&distance>1.25){
+        const waypoint=nextNavigationWaypoint(person.x,person.z);
+        if(waypoint)moving=moveTownsperson(person,waypoint.x,waypoint.z,person.speed,dt);
+        if(!moving)moving=moveTownspersonDirect(person,dt);
+      }else if(!person.aggro){
+        // Unalerted locals patrol a small area around their assigned room position.
+        // This keeps the interior populated without sending everyone into a pile-up.
+        person.wanderTimer-=dt;
+        const roamDistance=Math.hypot(person.wanderX-person.x,person.wanderZ-person.z);
+        if(person.wanderTimer<=0||roamDistance<0.3){
+          const angle=person.phase+elapsed*0.22;
+          const safe=nearestWalkableCell(
+            person.homeX+Math.cos(angle)*2.0,
+            person.homeZ+Math.sin(angle)*2.0
+          );
+          person.wanderX=safe?safe.x:person.homeX;
+          person.wanderZ=safe?safe.z:person.homeZ;
+          person.wanderTimer=2.6+(person.phase%1.4);
+        }
+        if(roamDistance>0.3)moving=moveTownsperson(person,person.wanderX,person.wanderZ,person.speed*0.22,dt);
       }
+      if(moving)person.model.group.rotation.y=Math.atan2(person.x-oldX,person.z-oldZ);
     }
-    person.x=Math.max(-39,Math.min(39,person.x));
-    person.z=Math.max(-39,Math.min(39,person.z));
+    person.x=Math.max(mapBounds.minX,Math.min(mapBounds.maxX,person.x));
+    person.z=Math.max(mapBounds.minZ,Math.min(mapBounds.maxZ,person.z));
     person.model.group.position.set(person.x,surfaceAt(person.x,person.z),person.z);
     if(!moving&&person.aggro)person.model.group.rotation.y=Math.atan2(player.x-person.x,player.z-person.z);
     person.model.pose({
       clip:person.stun>0?'hit':person.windup>0?'attack':moving?'walk':'idle',
       t:elapsed+person.phase,time:elapsed,
     });
-    if(!wasWinding&&person.aggro&&person.windup<=0&&distance<1.45&&person.attackTimer<=0&&person.stun<=0){
-      person.windup=0.42;person.attackTimer=1.35;
+    if(!wasWinding&&person.aggro&&person.windup<=0&&distance<1.7&&person.attackTimer<=0&&person.stun<=0){
+      person.windup=0.5;person.attackTimer=1.7;
       effects.ring(person.x,0,person.z,{colour:'#ff6159',reach:1.25,life:0.36});
     }
   }
  if(player.grounded&&player.ram>0&&Math.hypot(player.x-GETAWAY.x,player.z-GETAWAY.z)<2.9)deliverRam();
  const k=1-Math.exp(-5*dt);
  stage.target.x+=(player.x-stage.target.x)*k;stage.target.y+=(player.y+1.15-stage.target.y)*k;stage.target.z+=(player.z-stage.target.z)*k;
- stage.shake=Math.max(0,stage.shake-dt*0.6);effects.update(dt);updateHud();
+ stage.shake=Math.max(0,stage.shake-dt*0.6);effects.update(dt);
+ hudRefresh-=dt;
+ if(hudRefresh<=0){hudRefresh=0.12;updateHud();}
 });
+setLoadingProgress(100,'All assets ready. Opening the title screen…');
+ui.start.hidden=false;
+await nextPaint();
+loadingScreen?.classList.add('is-complete');
 globalThis.ramStealinSam = {
   player,
   stage,
   townsfolk,
   get ramPickups() { return ramItems.filter((item) => item.active).length; },
-  get raidableProperties() { return properties.filter((item) => !item.raided).length; },
+  get raidableProperties() { return properties.filter((item) => !item.raided && activeProperty(item)).length; },
   get townsfolk() { return townsfolk.filter((item) => item.hp > 0).length; },
+  get map() { return activeMap; },
+  get activeMapBounds() { return {...mapBounds}; },
+  get levelCount() { return TOTAL_LEVELS; },
+  get mapObjectCount() { return mapRoot.children?.length ?? 0; },
+  get visibleTownsfolk() { return townsfolk.filter((person) => person.hp > 0 && person.model.group.visible).length; },
+  get aggressiveTownsfolk() { return townsfolk.filter((person) => person.hp > 0 && person.aggro).length; },
   deliverRam,
+  truck,toggleTruck,properties:()=>properties,raidProperty,respawnPlayer,advanceLevel,
+  get mode(){return {started,won,holding,paused};},
+  reach(){rebuildNavigation(START.x,START.z);const f=(x,z)=>{const c=nearestWalkableCell(x,z);return c?navDistance[c.index]:-9;};return {start:canMoveTo(START.x,START.z),exit:f(GETAWAY.x,GETAWAY.z),props:properties.map(p=>[p.label,f(p.doorX,p.doorZ),canMoveTo(p.doorX,p.doorZ)]),alive:townsfolk.filter(t=>t.hp>0).length};},
 };
